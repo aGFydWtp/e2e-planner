@@ -1,0 +1,13 @@
+{
+  "//": "このスニペットを既存の package.json にマージしてください（そのまま置き換えない）。",
+  "scripts": {
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:headed": "playwright test --headed",
+    "e2e:report": "playwright show-report e2e/.report",
+    "e2e:update-snapshots": "playwright test --update-snapshots"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

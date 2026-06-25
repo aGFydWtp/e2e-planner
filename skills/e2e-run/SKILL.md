@@ -1,0 +1,68 @@
+---
+name: e2e-run
+description: E2Eワークフロー Step4。生成した Playwright spec を実行し、trace/video/screenshot を収集して、失敗を6分類（ロケータ破損/待機不足/前提データ不整合/期待値誤り/視覚baseline未作成/環境依存）に整理した失敗分類表を出力する。修正は承認後に最小差分で行う。
+when_to_use: e2e-codegen で spec ができた後、実行と証跡収集・失敗分類をするとき。修復ループで実行だけ再試行したいとき。e2e-plan オーケストレーターの Step4 として。
+argument-hint: <feature-name>
+---
+
+# Step4: 実行・証跡収集・失敗分類（e2e-run）
+
+生成した spec を実行し、証跡を残して、**失敗を分類してから**最小修正を提案する。"何が壊れたか" の分類を先に出すことで闇雲な self-heal を防ぐ。
+
+前提: `e2e/tests/<feature>.spec.ts` が存在し、`playwright.config.ts` が設定済みであること。未セットアップなら `e2e-codegen` のセットアップ手順を案内する。
+
+## 実行
+
+```bash
+npx playwright test e2e/tests/<feature>.spec.ts
+```
+
+設定（scaffold の `playwright.config.ts`）により、trace は on-first-retry、video は retain-on-failure、screenshot は only-on-failure で収集される。HTML レポートは `e2e/.report`、生の証跡は `e2e/.artifacts`。
+
+## 失敗の6分類
+
+失敗した test を必ず次のいずれかに分類する（複数該当時は主因＋副次を記す）:
+
+| 分類 | 典型症状 | 修正先 |
+|------|----------|--------|
+| ロケータ破損 | 要素が見つからない / DOM変更で壊れた | generator / spec（role/text/testid へ） |
+| 待機不足 | submit直後にassert / AJAX前に次操作 | generator / spec（web-first assertion） |
+| 前提データ不整合 | ログイン状態・権限・DB状態が違う／**storageState 失効・セッション切れ（setup未実行・state期限切れ・サイト側ログアウト）** | seed / environment / auth.setup（prompt では直さない） |
+| 期待値誤り | assertion の期待値が仕様と不一致 | spec または plan（仕様の見直し） |
+| 視覚baseline未作成 | toHaveScreenshot 初回で baseline 無し | **不具合ではない**。baseline を生成して確定 |
+| 環境依存 | タイムゾーン・ロケール・CIのみ失敗 | environment / config |
+
+> **VRT baseline の初回未生成は不具合扱いにしない。** `npx playwright test --update-snapshots` で baseline を作り、差分の妥当性を人間が確認してから確定する。
+
+> **teardown の「削除クリック警告」は失敗ではないが、「消えたこと」の検証アサート失敗は本物の失敗。** 破壊的・自己完結シナリオの後始末（afterEach/afterAll）で、削除クリック self は best-effort なので `[teardown] cleanup failed ...` の警告に留まり、これは6分類の「失敗」に数えない。**ただし e2e-codegen の規約により、後始末の末尾には「作成名がもう存在しない」ことを検証する `expect(...).toHaveCount(0)` が必ず入る。これが落ちたら『teardown が実機で発火していない（green なのに残骸が蓄積している）』という本物の失敗**なので、「前提データ不整合」ではなく**削除 UI 経路の「ロケータ破損」**として扱い、その削除フローを直す。残骸が出ても作成データは timestamp 付きユニーク名なので、ログの名前で特定して手動掃除すればよい。
+>
+> **teardown が実機で確立する（検証アサートが安定して green になる）まで、破壊的シナリオを本番類似環境で回さない。** 捨てプロジェクト/捨て環境で teardown 発火を確認してから本番へ向ける（e2e-codegen 参照）。
+
+## 成果物
+
+`e2e/reports/<feature>-<YYYYMMDD-HHmm>.md` に失敗分類表と証跡パスを書く。
+
+```markdown
+# E2E 実行レポート: <feature>
+
+> 実行日時: <YYYY-MM-DD HH:mm> / 結果: <N passed / M failed>
+
+## 失敗分類
+
+| test | 分類 | 根拠（trace/video/screenshot） | 提案する最小修正 | 修正先 |
+|------|------|--------------------------------|------------------|--------|
+| S5 再読込 | 待機不足 | e2e/.artifacts/.../trace.zip | reload後 toBeVisible で待つ | spec |
+| S3 視覚 | 視覚baseline未作成 | （baseline無し） | --update-snapshots で生成 | baseline |
+
+## 再評価メモ（Step5 手動用）
+- 同一 seed・同一データで再実行した安定性: <N/3 回 pass>
+- 繰り返す失敗分類: <...>
+```
+
+## 修正（承認ゲート②の後）
+
+失敗分類表を提示し、**ユーザーが修正方針を承認してから**最小差分で直す。分類ごとに修正先が違う（探索不足・状態遷移漏れは plan / e2e-map へ差し戻し、ロケータ・待機は spec、前提データは seed/env）。healer に plan 由来の漏れまで背負わせない。
+
+## 再評価（推奨）
+
+重要シナリオは**同一 seed・同一データ・同一環境で3回**実行し、「何回中何回通るか・どこで落ちるか・同じ分類に収まるか」を見る（flaky 検出）。

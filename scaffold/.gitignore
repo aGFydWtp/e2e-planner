@@ -1,0 +1,14 @@
+# e2e-planner scaffold が生成する成果物・秘密情報（プロジェクト直下の .gitignore にマージする）
+
+# 認証 storageState（ログイン済みセッション = 秘密情報。絶対にコミットしない）
+e2e/.auth/
+
+# 認証情報の実値（.env.example だけをコミットし、.env はコミットしない）
+.env
+
+# 実行証跡（trace/video/screenshot）と HTML レポート。
+# 失敗分類レポート（e2e/reports/*.md）は履歴として残すので無視しない。
+e2e/.artifacts/
+e2e/.report/
+test-results/
+playwright-report/
