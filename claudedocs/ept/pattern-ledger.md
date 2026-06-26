@@ -30,7 +30,7 @@
 - **P1（未確認の繰り越し）は codegen でも再現しうる**: plan に「仕様未確認・要確認」が残っているとき、codegen がそれを推測で assert 化しないか（toBeVisible で断定する等）を CE 系で監視する。
 - **P4 の教訓**: 上流成果物（map/plan）のフレーミングが下流 executor の判断を強く規定する。codegen 評価でも fixture（plan）の決定明示度が結果を左右する点に注意（codegen-edge は決定を焼き込み済みなので影響は限定的）。
 - **P1 は map では再現しなかった（positive）**: spec で問題化した「未確認の繰り越しを各自の裁量で補完」が、map/iter1（edge）では本文の「未確認明記＋ask-don't-guess（価値を推測で決め打ちしない）」条項により裁量なくルール駆動で処理された（ME1/ME2 critical ○）。→ P1 系の懸念は map 本文側では既に内在的に解消済み。
-- **実検証由来 critical アンカーのクロス生存**: run/iter1（edge）で、CE2/CE6（実 Asana の削除メニュー未発火＝teardown toHaveCount(0)）と verify-auth findings（SSO storageState 失効・コピー不可）が、run 本文の明示ルールにより白紙読みで正しく分類・ルーティングされた（RE1/RE2 ○）。executor は「前提データ不整合と誤分類したい誘惑」を自己申告で明示しつつ本文ルールに従って抗った＝**本文に実知見を明文で焼き込む戦略が下流の白紙読みでも効く**ことの再確認。
+- **実検証由来 critical アンカーのクロス生存**: run/iter1（edge）で、CE2/CE6（実検証の削除メニュー未発火＝teardown toHaveCount(0)）と verify-auth findings（SSO storageState 失効・コピー不可）が、run 本文の明示ルールにより白紙読みで正しく分類・ルーティングされた（RE1/RE2 ○）。executor は「前提データ不整合と誤分類したい誘惑」を自己申告で明示しつつ本文ルールに従って抗った＝**本文に実知見を明文で焼き込む戦略が下流の白紙読みでも効く**ことの再確認。
 
 ## map/run 総括（iter1 収束）
 - map / run とも **baseline（Iter-1）で critical 全○・正答率100%・新規失敗パターンゼロ**＝早期収束。本文ロジックは無編集（map は description のみ M1 補強）。spec/codegen が baseline で P1/P3/C1 の class-level defect を出したのと対照的に、map/run は本文に実知見が既に明文化されていたため白紙読みで生存した。

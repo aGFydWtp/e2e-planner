@@ -177,7 +177,7 @@ pnpm exec tsx scripts/save-state-cdp.ts
 
 > **採取の成功判定は Cookie だけを見ない。** `E2E_VERIFY_HOST` を指定すると、その host に紐づく **cookie / localStorage / IndexedDB のいずれか**に痕跡があれば成功とみなす（3種すべて空のときだけ「ログイン済みセッション無し」で失敗）。これにより Cookie を使わず IndexedDB にトークンを置く Firebase 等のアプリでも正しく成功判定できる。出力は保存場所別の内訳（例: `cookies: 0 / localStorage: 1 / indexedDB: 1 (firebaseLocalStorageDb)`）。
 
-> **プロファイルをコピーする方式（`save-storage-state.ts`）は SSO では機能しない。** Chrome の Cookie は OS の鍵ストア（macOS Keychain の Chrome Safe Storage）で暗号化されており、別プロセスで開くと復号鍵が違って Cookie 値が壊れ、ログイン画面に戻される。上記の CDP 接続方式が確実（実 Asana で asana.com cookies 79件の有効 state を採取し、認証側テストが pass することを実証済み）。`save-storage-state.ts` は OS 鍵ストアを使わない環境向けの参考に留める。
+> **プロファイルをコピーする方式（`save-storage-state.ts`）は SSO では機能しない。** Chrome の Cookie は OS の鍵ストア（macOS Keychain の Chrome Safe Storage）で暗号化されており、別プロセスで開くと復号鍵が違って Cookie 値が壊れ、ログイン画面に戻される。上記の CDP 接続方式が確実（実ブラウザの SSO セッションから有効な state を採取し、認証側テストが pass することを実証済み）。`save-storage-state.ts` は OS 鍵ストアを使わない環境向けの参考に留める。
 
 - どの方式かは Step1（`e2e-map`）の認証方式判定で先に確定させること。
 - **state 採取は利用者の手元環境で行う作業**。CI/エージェントは資格情報ストアに触れないため、SSO の state を代理生成できない。

@@ -23,7 +23,7 @@
 - **隔離**: SKILL.md本文＋fixture（録画ログ）を Task プロンプトに inline 同梱、リポ探索禁止・実 playwright 非実行、成果物はレポート本文で返させる（ディスク非書き込み）。承認ゲート②前のためコード修正禁止（分類表提示に留める）。median+edge を1メッセージで並列起動。
 
 ### 評価対象は成果物（失敗分類表）そのもの
-本文のオウム返しは測らない。**実検証由来の失敗モード（実 Asana の削除メニュー未発火＝CE2/CE6 とクロス／SSO storageState のコピー不可＝verify-auth findings とクロス）を critical アンカー**にして、白紙読みで正しく分類・ルーティングできるかを測る。
+本文のオウム返しは測らない。**実検証由来の失敗モード（実検証の削除メニュー未発火＝CE2/CE6 とクロス／SSO storageState のコピー不可＝verify-auth findings とクロス）を critical アンカー**にして、白紙読みで正しく分類・ルーティングできるかを測る。
 
 ### 要件チェックリスト
 `map-run-ept-plan.md` の RM1〜RM5 / RE1〜RE5（**事前固定・遡及改訂しない**）。critical=RM1/RM2・RE1/RE2。
@@ -47,7 +47,7 @@ executor: general-purpose（sonnet）× 2 並列・隔離。両者 `tool_uses=0`
 
 #### ハイライト（実検証由来 critical アンカーの生存確認）
 白紙読みで、実環境で壊れた失敗モードを全て正しく分類・ルーティング:
-- **RE1（teardown toHaveCount(0) → 削除UIのロケータ破損）**: edge は「残骸が残る→前提データ不整合と分類したい誘惑」を**自己申告で明示しつつ抗い**、本文の明示ルールに従い**削除UI経路のロケータ破損**と分類し afterEach 削除フローへ修正ルーティング。実 Asana の削除メニュー未発火知見（CE2/CE6）と一致。
+- **RE1（teardown toHaveCount(0) → 削除UIのロケータ破損）**: edge は「残骸が残る→前提データ不整合と分類したい誘惑」を**自己申告で明示しつつ抗い**、本文の明示ルールに従い**削除UI経路のロケータ破損**と分類し afterEach 削除フローへ修正ルーティング。実検証の削除メニュー未発火知見（CE2/CE6）と一致。
 - **RE2（storageState 失効の全赤 → 前提データ不整合／修正先 auth.setup・env、prompt で直さない）**: Run A 全6赤を単一原因の storageState 失効と判定、修正先を auth.setup/environment にし「spec 本体は触らない」と明記。SSO state はコピー不可・採取し直しが必要という verify-auth findings と整合。
 - **RM2（VRT baseline 初回未生成は不具合でない）**: `--update-snapshots` 生成＋人間確認に正しくルーティング、6分類の「失敗」に数えていない。
 - **RE4（探索不足/状態遷移漏れ → plan/e2e-map へ差し戻し）**: plan 未記載の「規約同意モーダル」を6分類に押し込めず、**plan(e2e-map)更新→codegen** へ差し戻すルーティングを選択（healer に plan 漏れを背負わせない条項が発火）。

@@ -79,7 +79,7 @@
 **run-edge（実検証アンカー）**
 | # | 項目 | 種別 |
 |---|------|------|
-| RE1 | teardown `toHaveCount(0)` 失敗を「前提データ不整合」でなく**削除UI経路の「ロケータ破損」**と分類し削除フローを直す | **critical**（実Asana削除メニュー未発火。codegen CE2/CE6 とクロス） |
+| RE1 | teardown `toHaveCount(0)` 失敗を「前提データ不整合」でなく**削除UI経路の「ロケータ破損」**と分類し削除フローを直す | **critical**（実検証の削除メニュー未発火。codegen CE2/CE6 とクロス） |
 | RE2 | storageState 失効の全赤を**「前提データ不整合」→修正先 seed/environment/auth.setup（prompt で直さない）** | **critical**（明示条項。verify-auth findings とクロス） |
 | RE3 | `.click().catch` hook 全滅を闇雲リトライせず当該フックのロケータ/待機問題と特定（spec修正） | normal（codegen CE4 とクロス） |
 | RE4 | 探索不足/状態遷移漏れ由来は spec/healer でなく plan/e2e-map へ差し戻す | normal（明示条項: healer に plan漏れを背負わせない） |

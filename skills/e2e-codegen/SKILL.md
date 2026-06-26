@@ -61,7 +61,7 @@ E2E_PASS=        # 同上
 ## 変換方針（固定）
 
 - **ロケータ**: `getByRole` / `getByText` / `getByLabel` / `getByTestId` を優先。CSS/XPath は最後の手段。
-- **未確定要素を index で取らない（破壊的事故の防止）**: **出現待ちをせずに `nth()` / `last()` / `first()` で可変リストの端をつかまない。** 特に「新規作成した行」を取るのに `getByRole('textbox').last()` のように書くと、新規行がまだ出現していない瞬間に**既存の最終行を掴み、その値を上書きして実データを破壊する**（実 Asana で既存タスクを改名する事故が発生）。新規作成の入力先は次のいずれかで特定する:
+- **未確定要素を index で取らない（破壊的事故の防止）**: **出現待ちをせずに `nth()` / `last()` / `first()` で可変リストの端をつかまない。** 特に「新規作成した行」を取るのに `getByRole('textbox').last()` のように書くと、新規行がまだ出現していない瞬間に**既存の最終行を掴み、その値を上書きして実データを破壊する**（可変リストで既存の最終行を改名してしまう破壊事故が実際に起きうる）。新規作成の入力先は次のいずれかで特定する:
   - **作成 UI で出る空行のフォーカスへ `page.keyboard.type(...)` で直接入力**（要素を取り直さない）、または
   - **件数の増加を待ってから新規行を特定**: 操作前に件数を控え、`await expect(rows).toHaveCount(before + 1)` で増加を待ってから `rows.nth(before)` を対象にする。この件数ガードは安全な取得であると同時に、`.last()` が既存行を改名した場合は件数が増えないため `toHaveCount` が落ちて**偽陽性（green なのに破壊）を検出する**役目も果たす。
 - **待機**: web-first assertion（`await expect(locator).toBeVisible()` など）で待つ。`waitForTimeout` の固定待機は使わない。**重い SPA では `page.goto()` / `page.reload()` の既定 `load` 待ちが長く test timeout に当たりやすい** ので、`{ waitUntil: 'domcontentloaded' }` を指定して描画後の web-first assertion で待つ（読み込み完了の判定は assertion 側に寄せる）。

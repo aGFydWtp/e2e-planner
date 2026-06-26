@@ -18,7 +18,7 @@ import { chromium } from '@playwright/test';
  *        --remote-debugging-port=9222 --remote-allow-origins='*' \
  *        --user-data-dir=/tmp/e2e-cdp-profile &
  * 2) その窓で対象アプリに普通にログインする（webdriver 制御ではないので bot 検知に当たらない）。
- * 3) 実行（VERIFY_HOST は対象のセッションが載るドメイン/オリジン。例: asana.com）:
+ * 3) 実行（VERIFY_HOST は対象のセッションが載るドメイン/オリジン。例: app.example.com）:
  *    成功判定は保存場所非依存: cookie / localStorage / IndexedDB のいずれかに痕跡があれば OK。
  *    Firebase 等トークンを IndexedDB に置くアプリ（indexedDB:true で採取）もこれで拾える。
  *      E2E_CDP_URL="http://localhost:9222" \
@@ -34,7 +34,7 @@ import { chromium } from '@playwright/test';
 
 const CDP = process.env.E2E_CDP_URL ?? 'http://localhost:9222';
 const OUT = process.env.E2E_STATE_OUT ?? 'e2e/.auth/user.json';
-const VERIFY_HOST = process.env.E2E_VERIFY_HOST; // 例: 'asana.com'
+const VERIFY_HOST = process.env.E2E_VERIFY_HOST; // 例: 'app.example.com'
 
 // Playwright の storageState() 戻り値型は origins[].indexedDB を公開していない
 // （`indexedDB: true` は採取オプションとしては型にあるが、返り値の型には未反映・1.61 時点）。

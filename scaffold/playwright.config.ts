@@ -40,7 +40,7 @@ export default defineConfig({
     trace: 'on-first-retry',
     video: 'retain-on-failure',
     screenshot: 'only-on-failure',
-    // 重い SPA（Asana 等）では goto/reload の既定 `load` 待ちが長く timeout しやすい。
+    // 重い SPA では goto/reload の既定 `load` 待ちが長く timeout しやすい。
     // 個々の goto/reload では `{ waitUntil: 'domcontentloaded' }` を指定し、描画後の
     // web-first assertion で待つこと（読み込み完了の判定は assertion 側に寄せる）。
     // navigationTimeout は安全側の上限。固定待機の代わりにはしない。
