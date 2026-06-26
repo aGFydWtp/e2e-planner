@@ -11,10 +11,35 @@ argument-hint: <feature-name>
 
 前提: `e2e/tests/<feature>.spec.ts` が存在し、`playwright.config.ts` が設定済みであること。未セットアップなら `e2e-codegen` のセットアップ手順を案内する。
 
+## 実行前の人間タスク（実行直前・`E2E_AUTH_MODE` で分岐）
+
+依存インストール・scaffold 配置・既知の非シークレット `.env` 値は **Step3（e2e-codegen）が自動で済ませている**。ここで残るのは**人間の手元でしかできない作業だけ**。`pnpm exec playwright test` を**走らせる直前に**、`.env` の `E2E_AUTH_MODE`（Step1 で確定）で分岐して、必要な指示だけを just-in-time で提示する。**済むまで実行しない**。
+
+- **`prebuilt-state`（SSO/OTP/2FA 等）** → CDP 経由の手動 state 採取が必要。次の具体手順を提示し、`e2e/.auth/<role>.json` が採取されるまで実行しない（詳細は `e2e-codegen/SKILL.md` の storageState レシピ／`scaffold/scripts/save-state-cdp.ts` 参照）:
+
+  ```bash
+  cp -r "${CLAUDE_PLUGIN_ROOT}/scaffold/scripts" ./scripts   # 未配置なら
+  # 1) debug ポート付きの実 Chrome を起動（既存 Chrome は閉じる。Chrome 111+ は --remote-allow-origins 必須、zsh では * をクオート）
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+    --remote-debugging-port=9222 --remote-allow-origins='*' \
+    --user-data-dir=/tmp/e2e-cdp-profile &
+  # 2) その窓で対象アプリに普通にログイン（webdriver 制御外なので bot 検知に当たらない）
+  # 3) 生きたセッションを storageState として吸い出す
+  E2E_CDP_URL="http://localhost:9222" \
+  E2E_STATE_OUT="e2e/.auth/user.json" \
+  E2E_VERIFY_HOST="app.example.com" \
+  pnpm exec tsx scripts/save-state-cdp.ts
+  ```
+  ロールごとに `E2E_STATE_OUT` を変えて複数回実行する。**この採取は利用者の手元環境でしか作れない**（CI/エージェントは資格情報ストアに触れない）。
+
+- **`form`（メール＋パスワード入力）** → `.env` の `E2E_USER`/`E2E_PASS` の投入をユーザーに依頼する。**シークレットはエージェントが書かず、ユーザーが手で入れる**（Step3 が空欄＋コメントで残してある／セキュリティ上の一貫した例外）。投入後に実行すれば、`auth.setup.ts` が自動ログインして storageState を採取する。
+
+- **`none`（認証不要）** → 何も出さず即実行。
+
 ## 実行
 
 ```bash
-npx playwright test e2e/tests/<feature>.spec.ts
+pnpm exec playwright test e2e/tests/<feature>.spec.ts
 ```
 
 設定（scaffold の `playwright.config.ts`）により、trace は on-first-retry、video は retain-on-failure、screenshot は only-on-failure で収集される。HTML レポートは `e2e/.report`、生の証跡は `e2e/.artifacts`。
@@ -32,7 +57,7 @@ npx playwright test e2e/tests/<feature>.spec.ts
 | 視覚baseline未作成 | toHaveScreenshot 初回で baseline 無し | **不具合ではない**。baseline を生成して確定 |
 | 環境依存 | タイムゾーン・ロケール・CIのみ失敗 | environment / config |
 
-> **VRT baseline の初回未生成は不具合扱いにしない。** `npx playwright test --update-snapshots` で baseline を作り、差分の妥当性を人間が確認してから確定する。
+> **VRT baseline の初回未生成は不具合扱いにしない。** `pnpm exec playwright test --update-snapshots` で baseline を作り、差分の妥当性を人間が確認してから確定する。
 
 > **teardown の「削除クリック警告」は失敗ではないが、「消えたこと」の検証アサート失敗は本物の失敗。** 破壊的・自己完結シナリオの後始末（afterEach/afterAll）で、削除クリック self は best-effort なので `[teardown] cleanup failed ...` の警告に留まり、これは6分類の「失敗」に数えない。**ただし e2e-codegen の規約により、後始末の末尾には「作成名がもう存在しない」ことを検証する `expect(...).toHaveCount(0)` が必ず入る。これが落ちたら『teardown が実機で発火していない（green なのに残骸が蓄積している）』という本物の失敗**なので、「前提データ不整合」ではなく**削除 UI 経路の「ロケータ破損」**として扱い、その削除フローを直す。残骸が出ても作成データは timestamp 付きユニーク名なので、ログの名前で特定して手動掃除すればよい。
 >

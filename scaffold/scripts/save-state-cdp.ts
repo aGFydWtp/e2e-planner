@@ -24,7 +24,7 @@ import { chromium } from '@playwright/test';
  *      E2E_CDP_URL="http://localhost:9222" \
  *      E2E_STATE_OUT="e2e/.auth/user.json" \
  *      E2E_VERIFY_HOST="example.com" \
- *      npx tsx scripts/save-state-cdp.ts
+ *      pnpm exec tsx scripts/save-state-cdp.ts
  *
  * ロールごとに E2E_STATE_OUT を変えて複数回実行する（user.json, admin.json …）。
  * 生成した state と .env は **コミットしない**（scaffold/.gitignore 参照）。

@@ -11,16 +11,34 @@ argument-hint: <feature-name>
 
 前提: plan が**承認済み**であること（承認ゲート①を通過）。未承認なら変換しない。
 
-## セットアップ確認（初回のみ）
+## セットアップ実行（初回のみ・自動）
 
-プロジェクトに `playwright.config.ts` が無い場合、scaffold から雛形をコピーするよう案内する:
+プロジェクトに `playwright.config.ts` が無い場合、**エージェントが自分で実行する**（ユーザーに丸投げしない・承認ゲートは挟まない）。「依存をインストールし scaffold を配置します」と**一行告知してから**次を実行する。ヘッドレスで完結する作業なので人間タスクはここで一切出さない（state 採取・資格情報投入は Step4 直前に移譲）。
 
 ```bash
+# 1) scaffold 配置
 cp "${CLAUDE_PLUGIN_ROOT}/scaffold/playwright.config.ts" ./playwright.config.ts
+cp "${CLAUDE_PLUGIN_ROOT}/scaffold/e2e/auth.setup.ts" ./e2e/auth.setup.ts
 mkdir -p e2e/tests e2e/plans e2e/reports
+cat "${CLAUDE_PLUGIN_ROOT}/scaffold/.gitignore" >> ./.gitignore   # 既存 .gitignore にマージ（重複行は後で確認）
 # package.json に test スクリプトを追記（${CLAUDE_PLUGIN_ROOT}/scaffold/package.snippet.json を参照）
-npm i -D @playwright/test && npx playwright install
+
+# 2) 依存インストール
+pnpm add -D @playwright/test dotenv tsx
+pnpm exec playwright install chromium
 ```
+
+**`.env` の生成（非シークレットの既知値のみ）**: エージェントが書いてよいのは Step1 で確定済みの**非シークレット値だけ**＝`E2E_BASE_URL`（Step1 の対象URL）と `E2E_AUTH_MODE`（Step1 確定値 form/prebuilt-state/none）。**シークレット（`E2E_USER`/`E2E_PASS`）は書かず、空欄＋コメントで残す**（投入は Step4 直前にユーザーへ依頼する）。
+
+```bash
+# 既存 .env が無い場合のみ新規生成する（.env と e2e/.auth/ は scaffold の .gitignore でコミット除外済み）
+E2E_BASE_URL=<Step1の対象URL>
+E2E_AUTH_MODE=<form | prebuilt-state | none>   # Step1 確定値
+E2E_USER=        # form の場合のみ。シークレットなのでエージェントは書かず Step4 直前にユーザーが投入
+E2E_PASS=        # 同上
+```
+
+**既存 `.env` がある場合は上書きしない**（非破壊）。不足しているキー（`E2E_BASE_URL`/`E2E_AUTH_MODE` 等）だけを差分として案内する。
 
 ## 認証必須アプリのセットアップ（storageState レシピ）
 
@@ -40,7 +58,7 @@ npm i -D @playwright/test && npx playwright install
 6. **SSO / OTP / 2FA で form 自動化できない場合** — `auth.setup.ts` の自動ログインは使えない（SSO は自動化ブラウザのログインを bot 検知で弾く）。**新規ログインせず、既にログイン済みの実ブラウザのセッションを `connectOverCDP` で取り出す**。同梱スクリプト `save-state-cdp.ts` を案内する:
    ```bash
    cp -r "${CLAUDE_PLUGIN_ROOT}/scaffold/scripts" ./scripts
-   npm i -D tsx
+   pnpm add -D tsx
    # 1) debug ポート付きの実 Chrome を起動（既存 Chrome は閉じる。Chrome 111+ は --remote-allow-origins 必須、zsh では * をクオート）
    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
      --remote-debugging-port=9222 --remote-allow-origins='*' \
@@ -50,7 +68,7 @@ npm i -D @playwright/test && npx playwright install
    E2E_CDP_URL="http://localhost:9222" \
    E2E_STATE_OUT="e2e/.auth/user.json" \
    E2E_VERIFY_HOST="app.example.com" \
-   npx tsx scripts/save-state-cdp.ts
+   pnpm exec tsx scripts/save-state-cdp.ts
    ```
    ロールごとに `E2E_STATE_OUT` を変えて複数回実行する。API ログインが可能ならそちら（`request.post` でトークン取得→state 注入）でもよい。**この分岐は Step1（e2e-map）の認証方式判定で既に分かっているはず。** state 採取は利用者の手元環境で行う作業で、CI/エージェントからは作れない。
    > **プロファイルをコピーする方式（`save-storage-state.ts`）は SSO では機能しない。** Chrome の Cookie は OS の鍵ストア（macOS Keychain の Chrome Safe Storage）で暗号化されており、別プロセスで開くと復号鍵が違って Cookie 値が壊れ、ログイン画面に戻される。上記の **CDP 接続方式（生きたブラウザの復号済みセッションを取得）が正解**。`save-storage-state.ts` は OS 鍵ストアを使わない環境向けの参考に留める。
@@ -177,4 +195,16 @@ test.describe('<feature>', () => {
 - [ ] 破壊的・自己完結シナリオに teardown（**UI 経路・削除は best-effort・ユニーク名・認証済み `newContext`・末尾に「消えたこと」の検証アサート**）があるか
 - [ ] Step2 で除外と決まっていないのに `test.skip` で眠らせていないか（除外は生成しない／自己完結は teardown 付きで生成）
 
-完了したら Step4（`e2e-run`）へ。
+### 機械実行ゲート（必須・落ちたら直す）
+
+自己点検の最後に、**「コンパイル＝走らせられる状態」を Step4 へ渡す前に保証する**。green を保証するものではなく、型エラー・import ミス・test 構文崩れ・タグ記法破綻を Step4 の前に潰す位置づけ。落ちたら直してから Step4 へ。
+
+```bash
+# 必須: 全 spec をトランスパイル＋import解決＋test収集（ブラウザ非起動）
+pnpm exec playwright test --list
+
+# 任意: tsconfig.json が存在する場合のみ型検査
+pnpm exec tsc --noEmit
+```
+
+完了したら Step4（`e2e-run`）へ。**人間タスク（state 採取・資格情報投入）の指示は Step3 からは一切出さない**——認証方式（`E2E_AUTH_MODE`）で分岐した just-in-time の指示は、実行直前の Step4 が提示する。

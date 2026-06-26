@@ -77,7 +77,7 @@ e2e/
   Step2 e2e-spec ┘
   ── ▌承認ゲート①（plan レビュー・修正・承認）
   Step3 e2e-codegen
-  Step4 e2e-run（npx playwright test → 証跡 → 失敗6分類）
+  Step4 e2e-run（pnpm exec playwright test → 証跡 → 失敗6分類）
   ── ▌承認ゲート②（修正方針の承認）
   Step5 e2e-audit（自動・承認ゲート不要 / e2e/index.md 再生成・テスト再実行なし）
 ```
@@ -108,7 +108,7 @@ e2e/
 ```bash
 cp "${CLAUDE_PLUGIN_ROOT}/scaffold/playwright.config.ts" ./playwright.config.ts
 mkdir -p e2e/tests e2e/plans e2e/reports
-npm i -D @playwright/test && npx playwright install
+pnpm add -D @playwright/test && pnpm exec playwright install
 # scaffold/package.snippet.json の scripts を package.json にマージ
 ```
 
@@ -160,7 +160,7 @@ SSO 等で form 自動化できないアプリは `E2E_AUTH_MODE=prebuilt-state`
 
 ```bash
 cp -r "${CLAUDE_PLUGIN_ROOT}/scaffold/scripts" ./scripts
-npm i -D tsx   # スクリプト実行に必要
+pnpm add -D tsx   # スクリプト実行に必要
 # 1) debug ポート付きの実 Chrome を起動（既存 Chrome は閉じる。Chrome 111+ は --remote-allow-origins 必須、zsh では * をクオート）
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   --remote-debugging-port=9222 --remote-allow-origins='*' \
@@ -170,7 +170,7 @@ npm i -D tsx   # スクリプト実行に必要
 E2E_CDP_URL="http://localhost:9222" \
 E2E_STATE_OUT="e2e/.auth/user.json" \
 E2E_VERIFY_HOST="app.example.com" \
-npx tsx scripts/save-state-cdp.ts
+pnpm exec tsx scripts/save-state-cdp.ts
 ```
 
 ロールごとに `E2E_STATE_OUT` を変えて複数回実行する。API ログインが可能ならそちら（`request.post` でトークン取得→state 注入）でもよい。

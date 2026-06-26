@@ -54,11 +54,13 @@ argument-hint: <feature-name> [対象URL / PRDパス / seed test など]
    - 成果物: `e2e/tests/<slug>.spec.ts`。
    - ロケータは role/text/testid 優先、CSS/XPath は最後の手段。非同期は web-first assertion で待つ。
    - 視覚差分が重要なシナリオには `toHaveScreenshot()` 併用候補をコメントで提案。
+   - **セットアップ未了なら Step3 が自動で（一行告知して）依存インストール・scaffold 配置・既知の非シークレット `.env` 値生成まで実行する**（承認ゲートは足さない）。**人間タスク（state 採取・資格情報投入）の指示は Step3 末尾では出さず、Step4 直前に `E2E_AUTH_MODE` 分岐で提示する。**
 
 ### Step4
 
 4. **`e2e-run` skill** を起動し、生成した spec を実行して証跡を収集する。
-   - `npx playwright test e2e/tests/<slug>.spec.ts` を実行。
+   - **実行直前に `E2E_AUTH_MODE` で分岐して人間タスクだけを just-in-time 提示する**（`prebuilt-state`=CDP 手動 state 採取手順 / `form`=`.env` への資格情報投入依頼 / `none`=即実行）。済むまで実行しない。
+   - `pnpm exec playwright test e2e/tests/<slug>.spec.ts` を実行。
    - 失敗を6分類（ロケータ破損 / 待機不足 / 前提データ不整合 / 期待値誤り / 視覚baseline未作成 / 環境依存）。
    - 成果物: `e2e/reports/<slug>-<YYYYMMDD-HHmm>.md`（失敗分類表 + trace/video/screenshot へのパス）。
    - **VRT baseline の初回未生成は不具合扱いにしない。**
@@ -78,6 +80,6 @@ argument-hint: <feature-name> [対象URL / PRDパス / seed test など]
 
 ## 注意
 
-- セットアップ未了（`playwright.config.ts` や `e2e/` が無い）の場合、`e2e-codegen` / `e2e-run` skill が `${CLAUDE_PLUGIN_ROOT}/scaffold/` から雛形をコピーする手順を案内する。
+- セットアップ未了（`playwright.config.ts` や `e2e/` が無い）の場合、`e2e-codegen`（Step3）が `${CLAUDE_PLUGIN_ROOT}/scaffold/` から**自動でコピー・インストールする**（一行告知して実行・承認ゲートは挟まない）。既知の非シークレット `.env` 値（`E2E_BASE_URL`/`E2E_AUTH_MODE`）まで Step3 が書き、シークレット投入と state 採取は Step4 直前に `E2E_AUTH_MODE` 分岐で人間へ依頼する。
 - Step5（`e2e-audit` による `e2e/index.md` 再生成）はワークフローの一部として**自動実行**される（上記）。横断 coverage の確認は単独 `/e2e-planner:e2e-audit` でも行える。
 - 漏れ分析の抽象化・prompt/skill への昇格はこのワークフローの範囲外（手動）。`e2e/index.md` の優先 gap 一覧と `e2e/reports/` の蓄積を見て手動で行う。

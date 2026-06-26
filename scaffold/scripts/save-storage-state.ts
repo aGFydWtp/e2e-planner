@@ -17,7 +17,7 @@ import * as readline from 'node:readline';
  *      E2E_STATE_URL="https://app.example.com/home" \
  *      E2E_STATE_OUT="e2e/.auth/user.json" \
  *      E2E_CHROME_PROFILE="/tmp/chrome-e2e-profile" \
- *      npx tsx scripts/save-storage-state.ts
+ *      pnpm exec tsx scripts/save-storage-state.ts
  * 4) 開いたウィンドウでログイン済み画面が出ていることを確認し、ターミナルで Enter → state 保存。
  *
  * ロールごとに E2E_STATE_OUT を変えて複数回実行する（e2e/.auth/user.json, admin.json …）。
