@@ -37,7 +37,7 @@ argument-hint: <feature-name> [対象URL / PRDパス / seed test など]
 
 2. 4項目が確定したら **`e2e-spec` skill** を起動し、遷移マップからシナリオ仕様を起こす。
    - 成果物: 同じ `e2e/plans/<slug>.md` の「シナリオ仕様」セクション（Markdown plan）。
-   - 7網羅クラス（happy path / validation error / permission差分 / 戻る操作 / 再読込 / 途中離脱 / ネットワーク遅延）を最低1件ずつ。
+   - 基本7観点（happy path / validation error / permission差分 / 戻る操作 / 再読込 / 途中離脱 / ネットワーク遅延）を最低1件ずつ。
    - 各シナリオに「開始状態・操作・中間観測点・終了条件・除外事項」を必須で持たせる。
 
 ### ▌承認ゲート①（plan レビュー）

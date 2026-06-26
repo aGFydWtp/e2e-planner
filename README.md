@@ -198,7 +198,7 @@ npx tsx scripts/save-state-cdp.ts
 
 ## 設計上の固定方針（レポート準拠）
 
-- **Step2 網羅クラス**: happy path / validation error / permission差分 / 戻る / 再読込 / 途中離脱 / ネットワーク遅延 を最低1件ずつ
+- **Step2 基本7観点**: happy path / validation error / permission差分 / 戻る / 再読込 / 途中離脱 / ネットワーク遅延 を最低1件ずつ
 - **各シナリオ必須項目**: 開始状態・操作・中間観測点・終了条件・除外事項（破壊的・自己完結シナリオは teardown も）＋横断 audit 用 `coverage` メタ（class/role/status）
 - **ロケータ**: role/text/testid 優先、CSS/XPath は最後の手段、`waitForTimeout` 禁止
 - **Step4 失敗6分類**: ロケータ破損 / 待機不足 / 前提データ不整合 / 期待値誤り / 視覚baseline未作成 / 環境依存
@@ -209,7 +209,7 @@ npx tsx scripts/save-state-cdp.ts
 feature 横断の coverage matrix を**維持台帳に持たず派生で出す**。同じ事実を複数箇所で同期させると drift するため、**正本は plan**・spec はタグで指す・audit は突合するだけ、という既存方針の延長。
 
 - **`coverage` メタ（plan が正本）**: 各シナリオに `class` / `role` / `status` の3フィールドを持たせる（Step2 / e2e-spec）。`route`・`risk` は足さない（route は開始状態に URL が既にある／risk は主観で drift）。
-  - **class**（7網羅クラスの slug）: `happy` / `validation` / `permission` / `back` / `reload` / `abandon` / `network`
+  - **class**（基本7観点の slug）: `happy` / `validation` / `permission` / `back` / `reload` / `abandon` / `network`
   - **role**（`storageState` 名に対応する slug）: `guest` / `user` / `admin` など
   - **status**（4値）: `active`（生成対象）/ `excluded`（明示除外）/ `needs_review`（承認前・有効に数えない＝既存「要確認（無人除外）」と同一視）/ `covered_elsewhere`（別 feature で検証済み・新規）
 - **spec タグ（mirror）**: Step3（e2e-codegen）が `[S<n> / map#<m>]`（plan↔spec の S/map 突合・既存）に加え、Playwright ネイティブ `tag: ['@feature:<slug>', '@class:<slug>', '@role:<slug>']`（class/role の横断集計・実行時 `--grep`・新規）を付与する。`annotations` API は使わない（`tag` に一本化）。
