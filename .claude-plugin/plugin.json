@@ -1,6 +1,6 @@
 {
   "name": "e2e-planner",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "WebアプリのE2Eテストシナリオを生成するワークフロー型プラグイン。到達範囲の地図化→シナリオ仕様化→Playwrightコード生成→実行・証跡収集の4段を、承認ゲート付きで進める。Playwright主軸。",
   "author": {
     "name": "haruki"
