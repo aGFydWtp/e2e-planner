@@ -52,6 +52,30 @@ const indexedDbOf = (origin: unknown): IndexedDBDatabaseLike[] =>
     process.exit(1);
   }
 
+  // 採取前に対象ページを reload して Playwright にフレームを観測させる（重要）。
+  //   connectOverCDP は「接続後に Playwright が観測したナビゲーション」の origin しか
+  //   storageState の localStorage/IndexedDB 収集対象にしない。接続前から開いていたタブは
+  //   対象外になり origins=0 になる（cookie は CDP 経由で全件取れるため混同しやすい）。
+  //   → 対象タブを一度 reload すれば Playwright が認識し、IndexedDB(firebaseLocalStorageDb 等)まで掬える。
+  const isReloadable = (url: string) => /^https?:\/\//.test(url); // about:blank / devtools:// は除外
+  const targets = context
+    .pages()
+    .filter((p) => isReloadable(p.url()))
+    .filter((p) => (VERIFY_HOST ? p.url().includes(VERIFY_HOST) : true));
+  for (const p of targets) {
+    // Firebase 等はハイドレーション後に IndexedDB を書くため networkidle まで待つ。
+    // 遅いページで networkidle がタイムアウトしても採取自体は試せるよう load にフォールバック。
+    await p.reload({ waitUntil: 'networkidle' }).catch(() => p.reload({ waitUntil: 'load' }).catch(() => {}));
+  }
+  if (VERIFY_HOST && targets.length === 0) {
+    console.error(
+      `✗ ${VERIFY_HOST} を開いているタブが debug Chrome に見つかりません。` +
+        `その窓で対象ページを開き、ログイン済みの状態にしてから再実行してください。`,
+    );
+    await browser.close();
+    process.exit(1);
+  }
+
   // 検証用にも IndexedDB を含めて読む（A3: 認証痕跡は cookie/localStorage/IndexedDB のどこにあってもよい）。
   const state = await context.storageState({ indexedDB: true });
 

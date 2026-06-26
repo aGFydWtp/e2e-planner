@@ -55,23 +55,8 @@ E2E_PASS=        # 同上
 3. **各テストは state を前提に開始する** — `playwright.config.ts` の project に `storageState: 'e2e/.auth/user.json'` が入っているので、テストは `page.goto('/dashboard')` から直接書ける。`test.use({ storageState })` を個別指定しない限り project の設定が効く。
 4. **複数ロール（permission差分）** — `auth.setup.ts` に role ごとの setup を足して `e2e/.auth/<role>.json` を保存し、config に role 別 project を足す（雛形にコメントあり）。
 5. **未ログイン検証**（ログイン画面・検証エラー・権限なしリダイレクト）は **state を持たない project** で実行する。ファイル名を `*.guest.spec.ts` 等にして project の `testMatch` で振り分ける（config にコメント例あり）。
-6. **SSO / OTP / 2FA で form 自動化できない場合** — `auth.setup.ts` の自動ログインは使えない（SSO は自動化ブラウザのログインを bot 検知で弾く）。**新規ログインせず、既にログイン済みの実ブラウザのセッションを `connectOverCDP` で取り出す**。同梱スクリプト `save-state-cdp.ts` を案内する:
-   ```bash
-   cp -r "${CLAUDE_PLUGIN_ROOT}/scaffold/scripts" ./scripts
-   pnpm add -D tsx
-   # 1) debug ポート付きの実 Chrome を起動（既存 Chrome は閉じる。Chrome 111+ は --remote-allow-origins 必須、zsh では * をクオート）
-   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-     --remote-debugging-port=9222 --remote-allow-origins='*' \
-     --user-data-dir=/tmp/e2e-cdp-profile &
-   # 2) その窓で対象アプリに普通にログイン（webdriver 制御外なので bot 検知に当たらない）
-   # 3) 生きたセッションを storageState として吸い出す
-   E2E_CDP_URL="http://localhost:9222" \
-   E2E_STATE_OUT="e2e/.auth/user.json" \
-   E2E_VERIFY_HOST="app.example.com" \
-   pnpm exec tsx scripts/save-state-cdp.ts
-   ```
-   ロールごとに `E2E_STATE_OUT` を変えて複数回実行する。API ログインが可能ならそちら（`request.post` でトークン取得→state 注入）でもよい。**この分岐は Step1（e2e-map）の認証方式判定で既に分かっているはず。** state 採取は利用者の手元環境で行う作業で、CI/エージェントからは作れない。
-   > **プロファイルをコピーする方式（`save-storage-state.ts`）は SSO では機能しない。** Chrome の Cookie は OS の鍵ストア（macOS Keychain の Chrome Safe Storage）で暗号化されており、別プロセスで開くと復号鍵が違って Cookie 値が壊れ、ログイン画面に戻される。上記の **CDP 接続方式（生きたブラウザの復号済みセッションを取得）が正解**。`save-storage-state.ts` は OS 鍵ストアを使わない環境向けの参考に留める。
+6. **SSO / OTP / 2FA で form 自動化できない場合** — `auth.setup.ts` の自動ログインは使えない（SSO は自動化ブラウザのログインを bot 検知で弾く）。方針は **`E2E_AUTH_MODE=prebuilt-state`**：新規ログインせず、既にログイン済みの実ブラウザのセッションを `connectOverCDP` で取り出す（同梱 `save-state-cdp.ts`）。**この分岐は Step1（e2e-map）で確定済み。** Step3 では `scripts/`（`save-state-cdp.ts`）と `tsx` を配置するところまでをヘッドレスで済ませ、**実 Chrome の起動・ログイン・採取の具体手順は Step4（e2e-run）が実行直前に案内する**（Chrome 起動と採取はエージェントが行い、ユーザーに頼むのはログインだけ）。ここでコピペ用の起動コマンドは出さない（人間タスクは Step4 が所有）。API ログインが可能ならそちら（`request.post` でトークン取得→state 注入）でもよい。
+   > **プロファイルをコピーする方式（`save-storage-state.ts`）は SSO では機能しない。** Chrome の Cookie は OS の鍵ストア（macOS Keychain の Chrome Safe Storage）で暗号化されており、別プロセスで開くと復号鍵が違って Cookie 値が壊れ、ログイン画面に戻される。**CDP 接続方式（生きたブラウザの復号済みセッションを取得）が正解**。`save-storage-state.ts` は OS 鍵ストアを使わない環境向けの参考に留める。
 
 ## 変換方針（固定）
 

@@ -15,24 +15,38 @@ argument-hint: <feature-name>
 
 依存インストール・scaffold 配置・既知の非シークレット `.env` 値は **Step3（e2e-codegen）が自動で済ませている**。ここで残るのは**人間の手元でしかできない作業だけ**。`pnpm exec playwright test` を**走らせる直前に**、`.env` の `E2E_AUTH_MODE`（Step1 で確定）で分岐して、必要な指示だけを just-in-time で提示する。**済むまで実行しない**。
 
-- **`prebuilt-state`（SSO/OTP/2FA 等）** → CDP 経由の手動 state 採取が必要。次の具体手順を提示し、`e2e/.auth/<role>.json` が採取されるまで実行しない（詳細は `e2e-codegen/SKILL.md` の storageState レシピ／`scaffold/scripts/save-state-cdp.ts` 参照）:
+- **`prebuilt-state`（SSO/OTP/2FA 等）** → CDP 経由の state 採取が必要。**ここはエージェントが主導する**：Chrome 起動・ポート確認・採取コマンド実行はエージェントが行い、**ユーザーに頼むのはログインだけ**にする（人間が手元でしかできないのは「実ブラウザでの本人ログイン」だけで、Chrome の起動を手作業させる必要はない）。`e2e/.auth/<role>.json` が採取されるまで `playwright test` は実行しない。
 
-  - **先に `scripts/save-state-cdp.ts` が最新版か確認する。** scaffold は既存プロジェクトに再配置されない（`playwright.config.ts` がある場合は上書きしない）ため、過去に展開した古いコピーが残っていることがある。**失敗メッセージが「cookie/localStorage/IndexedDB すべて0件」ではなく「Cookie が0件」とだけ出るなら旧版**（IndexedDB 非対応 → Firebase 等トークンを IndexedDB に置くアプリでは必ず失敗する）。その場合は `scaffold/scripts/save-state-cdp.ts` の内容で上書きしてから採取し直す。
+  **採取手順（エージェント実行）:**
 
-  ```bash
-  cp -r "${CLAUDE_PLUGIN_ROOT}/scaffold/scripts" ./scripts   # 未配置なら
-  # 1) debug ポート付きの実 Chrome を起動（既存 Chrome は閉じる。Chrome 111+ は --remote-allow-origins 必須、zsh では * をクオート）
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-    --remote-debugging-port=9222 --remote-allow-origins='*' \
-    --user-data-dir=/tmp/e2e-cdp-profile &
-  # 2) その窓で対象アプリに普通にログイン（webdriver 制御外なので bot 検知に当たらない）
-  # 3) 生きたセッションを storageState として吸い出す
-  E2E_CDP_URL="http://localhost:9222" \
-  E2E_STATE_OUT="e2e/.auth/user.json" \
-  E2E_VERIFY_HOST="app.example.com" \
-  pnpm exec tsx scripts/save-state-cdp.ts
-  ```
-  ロールごとに `E2E_STATE_OUT` を変えて複数回実行する。**この採取は利用者の手元環境でしか作れない**（CI/エージェントは資格情報ストアに触れない）。
+  1. **`scripts/save-state-cdp.ts` が最新版か確認する。** scaffold は既存プロジェクトに再配置されない（`playwright.config.ts` がある場合は上書きしない）ため、古いコピーが残っていることがある。**失敗メッセージが「cookie/localStorage/IndexedDB すべて0件」ではなく「Cookie が0件」とだけ出るなら旧版**（IndexedDB 非対応 → Firebase 等トークンを IndexedDB に置くアプリで必ず失敗）。その場合 `${CLAUDE_PLUGIN_ROOT}/scaffold/scripts/save-state-cdp.ts` の内容で上書きしてから採取し直す（未配置なら `cp -r "${CLAUDE_PLUGIN_ROOT}/scaffold/scripts" ./scripts`）。
+
+  2. **`9222` の使用状況を確認する。**`pgrep -fl "remote-debugging-port=9222"`。
+     - **未使用** → 次の3でエージェントが debug Chrome を起動する。
+     - **既に稼働中** → 起動し直さず再利用する（この Chrome は他者所有なので後で閉じない／手順6の対象外）。
+
+  3. **エージェントが debug Chrome をバックグラウンド起動し、対象URL（`.env` の `E2E_BASE_URL`）を最初から開く。** Chrome 111+ は `--remote-allow-origins` 必須、zsh では `*` をクオート。macOS 以外はバイナリのパスを読み替える。
+     ```bash
+     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+       --remote-debugging-port=9222 --remote-allow-origins='*' \
+       --user-data-dir=/tmp/e2e-cdp-profile "<E2E_BASE_URL>"
+     ```
+     （既存の普段使い Chrome は**閉じなくてよい**。別 `--user-data-dir` の独立インスタンスとして起動する。）その後 `curl -s http://localhost:9222/json/version` でポート稼働を確認する。
+
+  4. **ユーザーに頼むのはログインだけ。**「起動した窓で対象にログインし、**対象ページを開いたままにしてください**（タブを閉じない・別サイトへ移動しない）。済んだら教えてください」と促す。採取は対象タブを reload して origin を観測するため、**ログイン後にそのタブが開いている**ことが必須。
+
+  5. **ユーザーの合図後、エージェントが採取コマンドを実行する。**`E2E_VERIFY_HOST` は `E2E_BASE_URL` のホストから導出、`E2E_STATE_OUT` はロール名。成功表示は保存場所別内訳（例 `cookies: 0 / localStorage: 1 / indexedDB: 4 (firebaseLocalStorageDb)`）。
+     ```bash
+     E2E_CDP_URL="http://localhost:9222" \
+     E2E_STATE_OUT="e2e/.auth/user.json" \
+     E2E_VERIFY_HOST="app.example.com" \
+     pnpm exec tsx scripts/save-state-cdp.ts
+     ```
+     **複数ロールが要るなら**、同じ窓でログインし直してもらい `E2E_STATE_OUT` を変えて 4→5 を反復する（再起動・再ログイン不要）。
+
+  6. **全ロールの採取・検証が済んだら、エージェントが起動した Chrome を閉じる**（手順3で自分が起動した場合のみ。手順2で再利用した既存 Chrome は閉じない）。
+
+  > **`connectOverCDP` は IndexedDB を取れない、ではない。** 採取前に対象タブを reload しさえすれば `firebaseLocalStorageDb` 等の IndexedDB まで掬える（reload はスクリプトが自動で行う）。reload せず origins=0 を見て「CDP の限界」と早合点して Firebase Admin SDK 等へ切り替えない。`save-state-cdp.ts` が「cookie/localStorage/IndexedDB すべて0件」を出すのは、対象タブが開いていない／未ログインのときだけ。
 
 - **`form`（メール＋パスワード入力）** → `.env` の `E2E_USER`/`E2E_PASS` の投入をユーザーに依頼する。**シークレットはエージェントが書かず、ユーザーが手で入れる**（Step3 が空欄＋コメントで残してある／セキュリティ上の一貫した例外）。投入後に実行すれば、`auth.setup.ts` が自動ログインして storageState を採取する。
 
