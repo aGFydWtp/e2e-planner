@@ -47,7 +47,7 @@ argument-hint: <feature-name>
 ### 無人オーサリング時（ユーザーに確認できない場合）
 
 - **その場でユーザーに確認できない状況で新規に書く**なら、破壊的シナリオは**除外し「要確認」と明示**する。負債になる未検証の破壊的テストを盲目的に書かない。
-- ここでの「除外」は**シナリオ枠ごと消すことではない**。シナリオの枠（開始状態・操作・想定 teardown まで）は書き残し、状態を **「要確認（無人除外）」** と明記して**承認ゲート①へ送る**（人が「自己完結」を承認したら有効化、という申し送りにする）。枠ごと削除すると、何を確認すべきかの手がかりが失われる。**ただし承認前のものは「有効なテスト」として数えない**（コード生成 Step3 はこれを生成しない）。
+- ここでの「除外」は**シナリオ枠ごと消すことではない**。シナリオの枠（開始状態・操作・想定 teardown まで）は書き残し、状態を **「要確認（無人除外）」= `coverage` の `status=needs_review`** と明記して**承認ゲート①へ送る**（人が「自己完結」を承認したら `status=active` に上げて有効化、という申し送りにする）。枠ごと削除すると、何を確認すべきかの手がかりが失われる。**ただし承認前（`needs_review`）のものは「有効なテスト」として数えない**（コード生成 Step3 はこれを生成しない／`/e2e-audit` は優先 gap 一覧に集約する）。
 - 区別は「**人がいる場でのオーサリング vs 無人でのオーサリング**」。一度人と検証済みの破壊的テスト（teardown が確認済み）は、CI で無人実行してよい。無人で禁じるのは「未検証の破壊的テストを新規に書く」ことであって、検証済みテストの実行ではない。
 
 ### 不可逆な副作用は人がいても慎重に
@@ -71,6 +71,7 @@ argument-hint: <feature-name>
 | 項目 | 内容 |
 |------|------|
 | ID | `S<n>`（S1, S2, …）の連番。シナリオ見出しに必須採番。**Step3 が test タイトルに `[S<n> / map#<m>]` として埋め込み、Step4 の Coverage Matrix が逆引きする** ので飛ばさない |
+| coverage | 横断 audit（`/e2e-audit`）が機械的にパースする `class` / `role` / `status` の3フィールド。**正本はこの plan**。Step3 が同じ値を Playwright の `tag` に mirror し（`@class:` / `@role:`）、`/e2e-audit` が plan とタグのズレを「未突合」として検出する。下記「coverage メタ」参照 |
 | 遷移マップ参照 | このシナリオが導出された遷移マップ行の `#`（例: `map#2` / 複数なら `map#2,#5` / 該当無しは `map#-`）。遷移マップの `#` は Step1（e2e-map）の表で必須採番されている前提 |
 | 開始状態 | ログイン状態・データ前提・URL |
 | 操作 | ユーザー操作の列（番号付き） |
@@ -78,6 +79,40 @@ argument-hint: <feature-name>
 | 終了条件 | 成功とみなす最終状態（success criteria を曖昧にしない） |
 | 後始末（teardown） | **破壊的・自己完結シナリオのみ必須**。作成したデータを何でどう消すか（同じ UI 経路で削除など）。非破壊シナリオは `-`。 |
 | 除外事項 | このシナリオで検証しないこと |
+
+### coverage メタ（横断 audit 用の機械可読フィールド）
+
+各シナリオに `coverage` 行を1本必ず持たせる。これが横断 audit（`/e2e-audit`）の入力契約で、**plan が正本**。Step3（e2e-codegen）が同じ値を Playwright の `tag` に mirror し、`/e2e-audit` が `plans/ tests/ reports/` をスキャンして feature 横断の不足（class の穴・role の穴）を `e2e/index.md` に派生集約する。**この plan が唯一の正本で、台帳（coverage.yml 等）は持たない**（同じ事実を二重持ちして drift させない既存方針の延長）。
+
+書式（シナリオの先頭フィールドとして1行）:
+
+```markdown
+- **coverage**: class=`happy` / role=`guest` / status=`active`
+```
+
+- **class**（網羅クラスの slug・必須）— 下記7網羅クラスに対応する固定語彙。Step3 が `tag: '@class:<slug>'` に mirror し、audit が class×gap で集計する。
+
+  | class slug | 網羅クラス |
+  |------------|-----------|
+  | `happy` | happy path |
+  | `validation` | validation error |
+  | `permission` | permission差分 |
+  | `back` | 戻る操作 |
+  | `reload` | 再読込 |
+  | `abandon` | 途中離脱 |
+  | `network` | ネットワーク遅延 |
+
+- **role**（対象ロールの slug・必須）— そのシナリオが前提とする `storageState` に対応する slug。未ログインは `guest`、以降はプロジェクトのロール名に揃える（`user` / `admin` など。`開始状態` の `storageState=<role>` と同じ語）。Step3 が `tag: '@role:<slug>'` に mirror し、audit が role×gap で集計する。permission差分のように1シナリオで複数ロールを対比するなら主たるロールを書き、対の役は除外事項/中間観測点で補う。
+- **status**（4値・必須）— シナリオの取り扱い状態。**既存語彙の formalize**であり、新概念は `covered_elsewhere` の1つだけ。
+
+  | status | 意味 | 既存対応 |
+  |--------|------|----------|
+  | `active` | spec 生成対象（自己完結確定／非破壊の通常シナリオ） | 通常シナリオ |
+  | `excluded` | ユーザーが明示的に除外したシナリオ | 既存「除外」 |
+  | `needs_review` | 承認前・未確認。**有効に数えない**（Step3 は生成しない） | 既存「要確認（無人除外）」と**同一視**（別概念として2つ作らない） |
+  | `covered_elsewhere` | 別 feature で検証済みのため重複回避で本 feature では作らない（**新規**）。どこで検証済みかを除外事項に書く | （新規） |
+
+> `route`（経路URL）と `risk`（リスク度）はフィールドに足さない。route は `開始状態` に URL が既にあり、risk は主観で drift しやすいため。audit は class/role/status の3軸だけで横断不足を出す。
 
 ### 遷移マップの「未確認」項目の繰り越し
 
@@ -91,6 +126,7 @@ argument-hint: <feature-name>
 ## シナリオ仕様
 
 ### S1. ログイン成功（happy path）
+- **coverage**: class=`happy` / role=`guest` / status=`active`
 - **遷移マップ参照**: map#2
 - **開始状態**: 未ログイン / 有効な test ユーザーが存在 / `/login`
 - **操作**:
@@ -103,6 +139,7 @@ argument-hint: <feature-name>
 - **除外事項**: パスワードリセット導線は対象外
 
 ### S2. 必須項目未入力（validation error）
+- **coverage**: class=`validation` / role=`guest` / status=`active`
 - **遷移マップ参照**: map#4
 - **開始状態**: 未ログイン / `/login`
 - **操作**: 空のまま「ログイン」を押下

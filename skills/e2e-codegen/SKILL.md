@@ -90,7 +90,7 @@ test.describe('task lifecycle', () => {
   test.describe.configure({ mode: 'serial' });  // 破壊的シナリオは直列化（fullyParallel 下での競合回避・応急処置）
   const name = `e2e-task-${Date.now()}`;   // ユニーク名で残骸特定可能に
 
-  test('creates, completes, then deletes a task via UI [S4 / map#4]', async ({ page }) => {
+  test('creates, completes, then deletes a task via UI [S4 / map#4]', { tag: ['@feature:tasks', '@class:happy', '@role:user'] }, async ({ page }) => {
     await page.goto('/tasks');
     await page.getByRole('button', { name: '新規' }).click();
     await page.getByLabel('タイトル').fill(name);
@@ -126,16 +126,22 @@ test.describe('task lifecycle', () => {
 
 `e2e/tests/<feature>.spec.ts`。plan の各シナリオ（S1, S2, ...）を `test()` に1対1で対応させる。
 
-- **各 `test()` のタイトル末尾に Coverage タグ `[S<n> / map#<m>]` を埋め込む**（例: `[S1 / map#2]`）。`S<n>` は plan のシナリオ番号、`map#<m>` は対応する遷移マップ行の番号。**Step4（e2e-run）の Coverage Matrix がこのタグを機械的に逆引きして plan↔spern を突合する**ので、省略しない。シナリオが複数の遷移マップ行に跨るなら `[S3 / map#3,#5]` のように併記する。対応する遷移マップ行が無い（plan 起点で足したシナリオ等）なら `map#-` と書く。
+- **各 `test()` のタイトル末尾に Coverage タグ `[S<n> / map#<m>]` を埋め込む**（例: `[S1 / map#2]`）。`S<n>` は plan のシナリオ番号、`map#<m>` は対応する遷移マップ行の番号。**Step4（e2e-run）の Coverage Matrix がこのタグを機械的に逆引きして plan↔spec を突合する**ので、省略しない。シナリオが複数の遷移マップ行に跨るなら `[S3 / map#3,#5]` のように併記する。対応する遷移マップ行が無い（plan 起点で足したシナリオ等）なら `map#-` と書く。
 - タイトルに置けない事情があれば直前の近接コメントに同じタグを書く（タイトル優先）。
+- **横断 coverage タグ `tag: ['@feature:<slug>', '@class:<slug>', '@role:<slug>']` を `test()` のオプションに付ける**（タイトルタグとは別系統・併用）。これは `/e2e-audit` が feature 横断で class/role の充足を集計するための機械可読タグで、**plan の `coverage` フィールド（class/role）の mirror**。値は plan に揃える（勝手な slug を作らない）:
+  - `@feature:<slug>` — feature 名の slug（`e2e/tests/<slug>.spec.ts` の `<slug>` と同じ。ファイル単位で同一）。
+  - `@class:<slug>` — plan の `coverage: class=...`（`happy`/`validation`/`permission`/`back`/`reload`/`abandon`/`network` の固定語彙）。
+  - `@role:<slug>` — plan の `coverage: role=...`（`guest`/`user`/`admin` 等、`storageState` 名に対応）。
+  - Playwright ネイティブの `tag` を使う（**`annotations` API は採らない**。`tag` は `--grep '@class:network'` で実行時フィルタにも効き、集計用途で優れるため一本化）。タグ付き test は `test('title [S1 / map#2]', { tag: ['@feature:login', '@class:happy', '@role:guest'] }, async ({ page }) => { ... })` の形で書く。
+  - **`status` はタグに mirror しない**。`excluded` / `needs_review` / `covered_elsewhere` のシナリオはそもそも spec を生成しない（=tag も存在しない）。`/e2e-audit` は plan 側の `status` を直接読んで gap に集約する。
 
 ```ts
 import { test, expect } from '@playwright/test';
 
 // plan: e2e/plans/<feature>.md
 test.describe('<feature>', () => {
-  // S1. ログイン成功（happy path） / 遷移マップ #2
-  test('logs in with valid credentials [S1 / map#2]', async ({ page }) => {
+  // S1. ログイン成功（happy path） / 遷移マップ #2 / coverage: class=happy role=guest
+  test('logs in with valid credentials [S1 / map#2]', { tag: ['@feature:login', '@class:happy', '@role:guest'] }, async ({ page }) => {
     await page.goto('/login');                    // 開始状態
     await page.getByLabel('メールアドレス').fill('user@example.com');
     await page.getByLabel('パスワード').fill('password');
@@ -146,8 +152,8 @@ test.describe('<feature>', () => {
     // 視覚差分が重要なら: await expect(page).toHaveScreenshot('dashboard.png');
   });
 
-  // S2. 必須項目未入力（validation error） / 遷移マップ #4
-  test('shows validation error when fields are empty [S2 / map#4]', async ({ page }) => {
+  // S2. 必須項目未入力（validation error） / 遷移マップ #4 / coverage: class=validation role=guest
+  test('shows validation error when fields are empty [S2 / map#4]', { tag: ['@feature:login', '@class:validation', '@role:guest'] }, async ({ page }) => {
     await page.goto('/login');
     await page.getByRole('button', { name: 'ログイン' }).click();
     await expect(page.getByText('メールアドレスを入力してください')).toBeVisible();
@@ -160,6 +166,7 @@ test.describe('<feature>', () => {
 生成したら次を自分でチェックし、問題があれば直す:
 - [ ] 全シナリオ（plan の S1..Sn）が test として存在するか
 - [ ] **各 test タイトル（または近接コメント）に Coverage タグ `[S<n> / map#<m>]` があるか**（run の突合用・省略禁止）
+- [ ] **各 test に横断 coverage タグ `tag: ['@feature:<slug>', '@class:<slug>', '@role:<slug>']` があり、値が plan の `coverage`（class/role）と一致するか**（audit の集計用・省略禁止／`annotations` ではなく `tag`）
 - [ ] **破壊的・自己完結シナリオの describe に `test.describe.configure({ mode: 'serial' })` が付いているか**
 - [ ] CSS/XPath ロケータが残っていないか（残すなら理由をコメント）
 - [ ] 固定待機（`waitForTimeout`）が無いか

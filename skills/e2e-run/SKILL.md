@@ -91,3 +91,7 @@ npx playwright test e2e/tests/<feature>.spec.ts
 ## 再評価（推奨）
 
 重要シナリオは**同一 seed・同一データ・同一環境で3回**実行し、「何回中何回通るか・どこで落ちるか・同じ分類に収まるか」を見る（flaky 検出）。
+
+## feature 横断の確認は `/e2e-audit`
+
+この Coverage Matrix は**1 feature 内**（当該 plan↔spec↔実行結果）の突合に閉じている。**feature をまたいだスイート全体の不足（class/role の穴・未検証経路・`needs_review` の滞留）を見るには `/e2e-audit` を実行する**。`/e2e-audit` は `plans/ tests/ reports/` をスキャンして `e2e/index.md`（横断スナップショット）を再生成する（`/e2e-plan` の Step4 後に自動実行される。テストは再実行しない）。
