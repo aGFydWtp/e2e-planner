@@ -8,7 +8,9 @@ argument-hint: <feature-name> [対象URL / PRDパス / seed test など]
 対象機能: **$1**
 補足コンテキスト（任意）: $ARGUMENTS
 
-この4段ワークフロー（地図化→仕様化→コード生成→実行）を順に進め、**末尾で Step5（横断 audit）を自動実行**する。**Step2後とStep4後は必ず停止してユーザー承認を取る**。承認なしに次へ進んではならない。Step5（audit）は派生物 `e2e/index.md` の再生成なので承認ゲートを挟まない。各Stepは対応するskillに委譲する。
+この4段ワークフロー（地図化→仕様化→**コード生成＋収束ループ**→実行）を順に進め、**末尾で Step5（横断 audit）を自動実行**する。**Step2後とStep4後は必ず停止してユーザー承認を取る**。承認なしに次へ進んではならない。Step5（audit）は派生物 `e2e/index.md` の再生成なので承認ゲートを挟まない。各Stepは対応するskillに委譲する。
+
+> **Step3 が収束ループまで担う。** 憶測込みの spec はまず通らない前提で、Step3 が実画面探索（chrome-devtools / Playwright MCP）しながら自律で通るまで潰し、**通らない残差（残 `@guessed`）だけ Step4 が分類する**。認証確立・人間タスクも Step3 の収束ループ入口へ前倒しした（旧 Step4 直前の手動 state 採取は Step3 へ移設）。Step4 は確定版の証跡化・残差分類・Coverage Matrix・flaky 再評価に純化され、実行修正ループは持たない。
 
 ## feature-name の slug 化（ファイル名規約）
 
@@ -48,28 +50,31 @@ argument-hint: <feature-name> [対象URL / PRDパス / seed test など]
 
 承認が出るまで Step3 に進まない。
 
-### Step3（承認後）
+### Step3（承認後・収束ループまで）
 
-3. **`e2e-codegen` skill** を起動し、承認済み plan を Playwright spec へ変換する。
-   - 成果物: `e2e/tests/<slug>.spec.ts`。
-   - ロケータは role/text/testid 優先、CSS/XPath は最後の手段。非同期は web-first assertion で待つ。
+3. **`e2e-codegen` skill** を起動し、承認済み plan を Playwright spec へ変換し、**実画面を探索しながら通るまで収束させる**（静的生成 → 認証確立 → 収束ループ）。
+   - 成果物: `e2e/tests/<slug>.spec.ts`（収束済み＋残差は残 `@guessed` 付きで残る）。
+   - ロケータは role/text/testid 優先、CSS/XPath は最後の手段。非同期は web-first assertion で待つ。実画面未観測の行は `// @guessed` を付与。
    - 視覚差分が重要なシナリオには `toHaveScreenshot()` 併用候補をコメントで提案。
-   - **セットアップ未了なら Step3 が自動で（一行告知して）依存インストール・scaffold 配置・既知の非シークレット `.env` 値生成まで実行する**（承認ゲートは足さない）。**人間タスク（state 採取・資格情報投入）の指示は Step3 末尾では出さず、Step4 直前に `E2E_AUTH_MODE` 分岐で提示する。**
+   - **セットアップ未了なら Step3 が自動で（一行告知して）依存インストール・scaffold 配置・既知の非シークレット `.env` 値生成まで実行する**（承認ゲートは足さない）。
+   - **認証確立と人間タスク（state 採取・資格情報投入）は Step3 の「収束ループ入口」で `E2E_AUTH_MODE` 分岐により一度だけ行う**（`prebuilt-state`=CDP state 採取 / `form`=`.env` 投入依頼 / `none`=即ループ）。**「Step3 は人間タスクゼロ」原則はここで意図的に放棄する。**
+   - **収束ループ**: 初回フルラン → 落ちたテストだけを1本=1サブエージェント（直列）で chrome-devtools 診断 → Playwright MCP 検証 → spec 最小修正 → 実走、を **test ごと最大 N=3** 巡。green で `@guessed` を外し確定、N 尽きは残差化、(c) 計画漏れ/前提データ不整合は attempt 非消費で plan・map／seed・env へ差し戻す。**バックストップ上限（既定 = テスト数 × 3）** で累計暴走を防ぐ。
 
 ### Step4
 
-4. **`e2e-run` skill** を起動し、生成した spec を実行して証跡を収集する。
-   - **実行直前に `E2E_AUTH_MODE` で分岐して人間タスクだけを just-in-time 提示する**（`prebuilt-state`=CDP 手動 state 採取手順 / `form`=`.env` への資格情報投入依頼 / `none`=即実行）。済むまで実行しない。
-   - `pnpm exec playwright test e2e/tests/<slug>.spec.ts` を実行。
-   - 失敗を6分類（ロケータ破損 / 待機不足 / 前提データ不整合 / 期待値誤り / 視覚baseline未作成 / 環境依存）。
-   - 成果物: `e2e/reports/<slug>-<YYYYMMDD-HHmm>.md`（失敗分類表 + trace/video/screenshot へのパス）。
+4. **`e2e-run` skill** を起動し、**収束済みスイートをフレッシュに1回実行して証跡を収集し、残差だけを分類する**（実行修正ループは持たない）。
+   - **認証は Step3 で確立済み。Step4 は原則ノータスク**（`prebuilt-state` の state が失効していた場合のみ CDP 再採取）。
+   - `pnpm exec playwright test e2e/tests/<slug>.spec.ts` を実行（証跡は収束後の確定版で取得）。
+   - **残差（残 `@guessed` の失敗）だけ**を6分類（ロケータ破損 / 待機不足 / 前提データ不整合 / 期待値誤り / 視覚baseline未作成 / 環境依存）。収束済みは分類対象外。
+   - Coverage Matrix（plan↔spec↔結果突合）を作る。重要シナリオは**同一条件・無修正で3回**の flaky 再評価（収束ループの N=3 とは別物）。
+   - 成果物: `e2e/reports/<slug>-<YYYYMMDD-HHmm>.md`（Coverage Matrix + 残差分類表 + trace/video/screenshot へのパス）。
    - **VRT baseline の初回未生成は不具合扱いにしない。**
 
-### ▌承認ゲート②（修正方針）
+### ▌承認ゲート②（残差の扱い方針）
 
-失敗分類表を提示し、**修正方針をユーザーに承認させてから**最小差分で修正する。healer を暴走させない。
+残差分類表を提示し、**残差の処遇（EPT/プロンプト改善行き / plan・map 差し戻し / seed・env 差し戻し）をユーザーに承認させる**。Step4 はその場で spec を直して通し直さない（spec 修正は Step3 収束ループの仕事）。**全テストが収束していれば残差ゼロで、このゲートは実質スルー。**
 
-> 「失敗の分類はこの通りです。どの修正を適用してよいか確認してください。」
+> 「残差の分類と処遇方針はこの通りです。どこへ差し戻す／何に記録するか確認してください。」
 
 ### Step5（自動・承認ゲート不要）
 
@@ -80,6 +85,6 @@ argument-hint: <feature-name> [対象URL / PRDパス / seed test など]
 
 ## 注意
 
-- セットアップ未了（`playwright.config.ts` や `e2e/` が無い）の場合、`e2e-codegen`（Step3）が `${CLAUDE_PLUGIN_ROOT}/scaffold/` から**自動でコピー・インストールする**（一行告知して実行・承認ゲートは挟まない）。既知の非シークレット `.env` 値（`E2E_BASE_URL`/`E2E_AUTH_MODE`）まで Step3 が書き、シークレット投入と state 採取は Step4 直前に `E2E_AUTH_MODE` 分岐で人間へ依頼する。
+- セットアップ未了（`playwright.config.ts` や `e2e/` が無い）の場合、`e2e-codegen`（Step3）が `${CLAUDE_PLUGIN_ROOT}/scaffold/` から**自動でコピー・インストールする**（一行告知して実行・承認ゲートは挟まない）。既知の非シークレット `.env` 値（`E2E_BASE_URL`/`E2E_AUTH_MODE`）まで Step3 が書き、シークレット投入と state 採取は **Step3 の収束ループ入口**で `E2E_AUTH_MODE` 分岐により人間へ依頼する（旧・Step4 直前から前倒し移設）。
 - Step5（`e2e-audit` による `e2e/index.md` 再生成）はワークフローの一部として**自動実行**される（上記）。横断 coverage の確認は単独 `/e2e-planner:e2e-audit` でも行える。
 - 漏れ分析の抽象化・prompt/skill への昇格はこのワークフローの範囲外（手動）。`e2e/index.md` の優先 gap 一覧と `e2e/reports/` の蓄積を見て手動で行う。

@@ -97,3 +97,13 @@ executor: general-purpose（sonnet）× 2 並列・隔離。両者 `tool_uses=0`
 
 ### ✅ 収束判定（真の頭打ち）
 critical 全○（両iter両fixture）＋ 新規パターンゼロ ＋ 正答率上げ止まり（median 80%→100%・edge 100%固定）。**e2e-codegen は Iter-2 で収束**。適用した本文 diff は Iter-0 description 補強＋Iter-1 の C1 additive 条項1件のみ（既存ロジック不変）。実検証由来の破壊事故モード（nth/last/first・toHaveCount(0)・認証済み newContext・.click().catch hang）は**白紙読みで全て生存**。
+
+---
+
+## 構造変更（2026-06-26）: 収束ループの追加 — 既存収束ベースラインは superseded
+
+EPT チューニングとは別軸で、**設計変更**として e2e-codegen に「収束ループ」節を追加した（`/grill-me` で全分岐確定済み）。これは additive な条項追記ではなく**スキルの責務拡張**で、上記 Iter-2 収束判定の前提（=静的生成のみのスキル）を変える。**したがって上記の収束ベースラインは superseded。次回 EPT は新責務で取り直す。**
+
+- **本文 diff（codegen）**: ①出所マーカー `// @guessed`（実画面未観測行に付与・実走 green で除去・残差は残す）を変換方針／自己点検／成果物例に追加。②新節「収束ループ（認証確立 → 実走 → 探索 → 修正）」を追加——認証を収束ループ入口で一度だけ確立（旧 Step4 の CDP 手動採取手順を移設）、初回フルラン→落ちたテストだけ 1本=1サブエージェント（直列）で chrome-devtools 診断→Playwright MCP 検証→spec 最小修正→実走、**test ごと最大 N=3**、出口3分類（(a)収束で `@guessed` 除去 / (b)N尽きで残差化 / (c)plan・map／seed・env 差し戻しは attempt 非消費）、**バックストップ上限=テスト数×3**。③「収束ループの N=3 ≠ Step4 の flaky 再評価（無修正3回）」を明記。
+- **連動 diff**: e2e-run は実行修正ループを削除し「残差分類＋証跡収集＋Coverage Matrix＋flaky 再評価」へ純化（`e2e-run-eval.md` 末尾参照）。CDP 採取手順は e2e-run → e2e-codegen へ移設。`/e2e-plan`・`/e2e-audit`・`e2e-map` の Step3/Step4 責務記述も同期。
+- **次回 EPT の観点案**: @guessed の付与/除去の弁別精度、出口3分類の判定（特に (c) 早期離脱の見極め）、サブエージェント直列化とオーケストレータへの返り値最小化、バックストップ到達時の Step4 残差流し。なお収束ループは実ブラウザ/実走を伴うため、白紙読み EPT ではなく**実 smoke 寄りの検証**が要る点に注意（純粋な静的読みではループ挙動を測れない）。

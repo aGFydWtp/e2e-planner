@@ -1,7 +1,7 @@
 ---
 name: e2e-codegen
-description: E2Eワークフロー Step3。承認済みの Markdown plan を Playwright の .spec.ts へ変換する。ロケータは role/text/testid 優先、非同期は web-first assertion、視覚差分は toHaveScreenshot 併用候補をコメント提案。未出現要素を nth/last/first で掴まない。破壊的・自己完結シナリオは UI経路の teardown（認証済み context・末尾に消滅検証）まで生成する。生成後に selector と assertion を自己点検する。
-when_to_use: e2e-spec の plan が承認された後、Playwright テストコードを生成するとき。e2e-plan オーケストレーターの Step3 として。
+description: E2Eワークフロー Step3。承認済みの Markdown plan を Playwright の .spec.ts へ変換し、実画面を探索しながら自律で通るまで収束させる。静的生成→認証確立→収束ループ（chrome-devtools診断+Playwright MCP検証+spec最小修正+実走）の三段。実画面未観測の行は `// @guessed` を付け、実走greenで外す。ロケータは role/text/testid 優先、非同期は web-first assertion、視覚差分は toHaveScreenshot 併用候補をコメント提案。未出現要素を nth/last/first で掴まない。破壊的・自己完結シナリオは UI経路の teardown（認証済み context・末尾に消滅検証）まで生成する。N回試しても通らない残差（残 @guessed）だけ Step4 へ渡す。
+when_to_use: e2e-spec の plan が承認された後、Playwright テストコードを生成し実画面探索で通るまで収束させるとき。e2e-plan オーケストレーターの Step3 として。
 argument-hint: <feature-name>
 ---
 
@@ -13,7 +13,7 @@ argument-hint: <feature-name>
 
 ## セットアップ実行（初回のみ・自動）
 
-プロジェクトに `playwright.config.ts` が無い場合、**エージェントが自分で実行する**（ユーザーに丸投げしない・承認ゲートは挟まない）。「依存をインストールし scaffold を配置します」と**一行告知してから**次を実行する。ヘッドレスで完結する作業なので人間タスクはここで一切出さない（state 採取・資格情報投入は Step4 直前に移譲）。
+プロジェクトに `playwright.config.ts` が無い場合、**エージェントが自分で実行する**（ユーザーに丸投げしない・承認ゲートは挟まない）。「依存をインストールし scaffold を配置します」と**一行告知してから**次を実行する。ヘッドレスで完結する作業なので人間タスクはここでは出さない（state 採取・資格情報投入は後段の「収束ループ入口（認証確立）」で一度だけ依頼する）。
 
 ```bash
 # 1) scaffold 配置
@@ -28,13 +28,13 @@ pnpm add -D @playwright/test dotenv tsx
 pnpm exec playwright install chromium
 ```
 
-**`.env` の生成（非シークレットの既知値のみ）**: エージェントが書いてよいのは Step1 で確定済みの**非シークレット値だけ**＝`E2E_BASE_URL`（Step1 の対象URL）と `E2E_AUTH_MODE`（Step1 確定値 form/prebuilt-state/none）。**シークレット（`E2E_USER`/`E2E_PASS`）は書かず、空欄＋コメントで残す**（投入は Step4 直前にユーザーへ依頼する）。
+**`.env` の生成（非シークレットの既知値のみ）**: エージェントが書いてよいのは Step1 で確定済みの**非シークレット値だけ**＝`E2E_BASE_URL`（Step1 の対象URL）と `E2E_AUTH_MODE`（Step1 確定値 form/prebuilt-state/none）。**シークレット（`E2E_USER`/`E2E_PASS`）は書かず、空欄＋コメントで残す**（投入は後段の収束ループ入口でユーザーへ依頼する）。
 
 ```bash
 # 既存 .env が無い場合のみ新規生成する（.env と e2e/.auth/ は scaffold の .gitignore でコミット除外済み）
 E2E_BASE_URL=<Step1の対象URL>
 E2E_AUTH_MODE=<form | prebuilt-state | none>   # Step1 確定値
-E2E_USER=        # form の場合のみ。シークレットなのでエージェントは書かず Step4 直前にユーザーが投入
+E2E_USER=        # form の場合のみ。シークレットなのでエージェントは書かず収束ループ入口でユーザーが投入
 E2E_PASS=        # 同上
 ```
 
@@ -55,11 +55,12 @@ E2E_PASS=        # 同上
 3. **各テストは state を前提に開始する** — `playwright.config.ts` の project に `storageState: 'e2e/.auth/user.json'` が入っているので、テストは `page.goto('/dashboard')` から直接書ける。`test.use({ storageState })` を個別指定しない限り project の設定が効く。
 4. **複数ロール（permission差分）** — `auth.setup.ts` に role ごとの setup を足して `e2e/.auth/<role>.json` を保存し、config に role 別 project を足す（雛形にコメントあり）。
 5. **未ログイン検証**（ログイン画面・検証エラー・権限なしリダイレクト）は **state を持たない project** で実行する。ファイル名を `*.guest.spec.ts` 等にして project の `testMatch` で振り分ける（config にコメント例あり）。
-6. **SSO / OTP / 2FA で form 自動化できない場合** — `auth.setup.ts` の自動ログインは使えない（SSO は自動化ブラウザのログインを bot 検知で弾く）。方針は **`E2E_AUTH_MODE=prebuilt-state`**：新規ログインせず、既にログイン済みの実ブラウザのセッションを `connectOverCDP` で取り出す（同梱 `save-state-cdp.ts`）。**この分岐は Step1（e2e-map）で確定済み。** Step3 では `scripts/`（`save-state-cdp.ts`）と `tsx` を配置するところまでをヘッドレスで済ませ、**実 Chrome の起動・ログイン・採取の具体手順は Step4（e2e-run）が実行直前に案内する**（Chrome 起動と採取はエージェントが行い、ユーザーに頼むのはログインだけ）。ここでコピペ用の起動コマンドは出さない（人間タスクは Step4 が所有）。API ログインが可能ならそちら（`request.post` でトークン取得→state 注入）でもよい。
+6. **SSO / OTP / 2FA で form 自動化できない場合** — `auth.setup.ts` の自動ログインは使えない（SSO は自動化ブラウザのログインを bot 検知で弾く）。方針は **`E2E_AUTH_MODE=prebuilt-state`**：新規ログインせず、既にログイン済みの実ブラウザのセッションを `connectOverCDP` で取り出す（同梱 `save-state-cdp.ts`）。**この分岐は Step1（e2e-map）で確定済み。** ここ（静的生成）では `scripts/`（`save-state-cdp.ts`）と `tsx` を配置するところまでをヘッドレスで済ませ、**実 Chrome の起動・ログイン・採取の具体手順は後段の「収束ループ入口（認証確立）」が案内する**（Chrome 起動と採取はエージェントが行い、ユーザーに頼むのはログインだけ）。ここでコピペ用の起動コマンドは出さない（人間タスクは収束ループ入口が所有）。API ログインが可能ならそちら（`request.post` でトークン取得→state 注入）でもよい。
    > **プロファイルをコピーする方式（`save-storage-state.ts`）は SSO では機能しない。** Chrome の Cookie は OS の鍵ストア（macOS Keychain の Chrome Safe Storage）で暗号化されており、別プロセスで開くと復号鍵が違って Cookie 値が壊れ、ログイン画面に戻される。**CDP 接続方式（生きたブラウザの復号済みセッションを取得）が正解**。`save-storage-state.ts` は OS 鍵ストアを使わない環境向けの参考に留める。
 
 ## 変換方針（固定）
 
+- **出所マーカー `// @guessed`（実画面未観測の証）を付ける**: 静的生成の時点では plan は憶測込みで、ロケータ・期待値が実画面と合う保証がない。**実画面を一度も観測せずに書いた行は、入口の `goto`（開始状態）を除き原則すべて行末に `// @guessed` を付ける**（過小申告より過剰申告に倒す＝安全側）。確信のないロケータ・待機・期待値ほど必ず付ける。このマーカーは後段の収束ループで**実走 green になった行から外し**、N 回試しても通らない**残差テストには残す**（=未収束の証）。Step4 は「残った `@guessed` を含む失敗テスト」だけを残差として機械的に拾うので、外し忘れ・付け忘れに注意する。
 - **ロケータ**: `getByRole` / `getByText` / `getByLabel` / `getByTestId` を優先。CSS/XPath は最後の手段。
 - **未確定要素を index で取らない（破壊的事故の防止）**: **出現待ちをせずに `nth()` / `last()` / `first()` で可変リストの端をつかまない。** 特に「新規作成した行」を取るのに `getByRole('textbox').last()` のように書くと、新規行がまだ出現していない瞬間に**既存の最終行を掴み、その値を上書きして実データを破壊する**（可変リストで既存の最終行を改名してしまう破壊事故が実際に起きうる）。新規作成の入力先は次のいずれかで特定する:
   - **作成 UI で出る空行のフォーカスへ `page.keyboard.type(...)` で直接入力**（要素を取り直さない）、または
@@ -147,15 +148,17 @@ import { test, expect } from '@playwright/test';
 test.describe('<feature>', () => {
   // S1. ログイン成功（happy path） / 遷移マップ #2 / coverage: class=happy role=guest
   test('logs in with valid credentials [S1 / map#2]', { tag: ['@feature:login', '@class:happy', '@role:guest'] }, async ({ page }) => {
-    await page.goto('/login');                    // 開始状態
-    await page.getByLabel('メールアドレス').fill('user@example.com');
-    await page.getByLabel('パスワード').fill('password');
-    await page.getByRole('button', { name: 'ログイン' }).click();
+    await page.goto('/login');                    // 開始状態（入口の goto は @guessed を付けない）
+    await page.getByLabel('メールアドレス').fill('user@example.com');  // @guessed
+    await page.getByLabel('パスワード').fill('password');              // @guessed
+    await page.getByRole('button', { name: 'ログイン' }).click();      // @guessed
     // 中間観測点: ローディング → 遷移
-    await expect(page).toHaveURL(/\/dashboard/);   // 終了条件
-    await expect(page.getByRole('heading', { name: 'ダッシュボード' })).toBeVisible();
+    await expect(page).toHaveURL(/\/dashboard/);   // 終了条件 // @guessed
+    await expect(page.getByRole('heading', { name: 'ダッシュボード' })).toBeVisible();  // @guessed
     // 視覚差分が重要なら: await expect(page).toHaveScreenshot('dashboard.png');
   });
+  // ↑ 静的生成直後はこのように実画面未観測の行に @guessed が付く。収束ループで実走 green になった行から外し、
+  //   N 回で通らなければ残したまま Step4 へ残差として渡す。
 
   // S2. 必須項目未入力（validation error） / 遷移マップ #4 / coverage: class=validation role=guest
   test('shows validation error when fields are empty [S2 / map#4]', { tag: ['@feature:login', '@class:validation', '@role:guest'] }, async ({ page }) => {
@@ -170,6 +173,7 @@ test.describe('<feature>', () => {
 
 生成したら次を自分でチェックし、問題があれば直す:
 - [ ] 全シナリオ（plan の S1..Sn）が test として存在するか
+- [ ] **確信のないロケータ・待機・期待値の行に `// @guessed` が付いているか**（実画面未観測の行は入口 goto を除き原則すべて付与＝過剰申告側に倒す。収束ループで実走 green になった行から外す）
 - [ ] **各 test タイトル（または近接コメント）に Coverage タグ `[S<n> / map#<m>]` があるか**（run の突合用・省略禁止）
 - [ ] **各 test に横断 coverage タグ `tag: ['@feature:<slug>', '@class:<slug>', '@role:<slug>']` があり、値が plan の `coverage`（class/role）と一致するか**（audit の集計用・省略禁止／`annotations` ではなく `tag`）
 - [ ] **破壊的・自己完結シナリオの describe に `test.describe.configure({ mode: 'serial' })` が付いているか**
@@ -186,7 +190,7 @@ test.describe('<feature>', () => {
 
 ### 機械実行ゲート（必須・落ちたら直す）
 
-自己点検の最後に、**「コンパイル＝走らせられる状態」を Step4 へ渡す前に保証する**。green を保証するものではなく、型エラー・import ミス・test 構文崩れ・タグ記法破綻を Step4 の前に潰す位置づけ。落ちたら直してから Step4 へ。
+自己点検の最後に、**「コンパイル＝走らせられる状態」を収束ループへ渡す前に保証する**。green を保証するものではなく、型エラー・import ミス・test 構文崩れ・タグ記法破綻を収束ループの実走前に潰す位置づけ。落ちたら直してから収束ループへ。
 
 ```bash
 # 必須: 全 spec をトランスパイル＋import解決＋test収集（ブラウザ非起動）
@@ -196,4 +200,97 @@ pnpm exec playwright test --list
 pnpm exec tsc --noEmit
 ```
 
-完了したら Step4（`e2e-run`）へ。**人間タスク（state 採取・資格情報投入）の指示は Step3 からは一切出さない**——認証方式（`E2E_AUTH_MODE`）で分岐した just-in-time の指示は、実行直前の Step4 が提示する。
+コンパイルが通ったら、次の**収束ループ**へ進む（静的生成はここで終わり）。
+
+## 収束ループ（認証確立 → 実走 → 探索 → 修正）
+
+静的生成した spec は憶測込み（`@guessed` 多数）で、**そのままでは通らない前提**。憶測で書いた E2E をまず通らないものとして扱い、**ここで実画面を探索しながら自律で潰し、N 回試しても通らない残差だけ Step4 へ渡す**。修正ごとの人間承認は挟まない（静的生成の自己点検が無ゲートなのと同じ＝ループは自律）。
+
+### 入口: 認証を一度だけ確立する（Step3 唯一の人間タスク）
+
+収束ループに入る前に、`.env` の `E2E_AUTH_MODE`（Step1 で確定）で分岐して認証状態を**一度だけ**作る。**これが Step3 で唯一の人間タスク**。従来 Step4 直前に置いていた state 採取・資格情報投入をここへ前倒しした——**「Step3 は人間タスクゼロ」という現行原則はここで意図的に放棄する**（憶測を実走で潰すには、実画面とログイン済み state が収束ループ中に要るため。トレードオフ合意済み）。
+
+- **`none`（認証不要）** → 何も依頼せず即ループへ。
+- **`form`（メール＋パスワード）** → `.env` の `E2E_USER`/`E2E_PASS` 投入をユーザーに依頼する（**シークレットはエージェントが書かない**／セットアップが空欄＋コメントで残してある／一貫した例外）。投入後 `auth.setup.ts` が自動ログインして `e2e/.auth/<role>.json` を採取する。
+- **`prebuilt-state`（SSO/OTP/2FA 等）** → CDP 経由で実ブラウザのログイン済みセッションを採取する。**この採取手順は収束ループ入口が所有する**（旧 Step4 から移設）。**ここはエージェントが主導する**：Chrome 起動・ポート確認・採取コマンド実行はエージェントが行い、**ユーザーに頼むのはログインだけ**。`e2e/.auth/<role>.json` が採取されるまで実走に進まない。
+  - **二系統を並行させる（探索=生ブラウザ / 実走=storageState）**: 採取後もこの debug Chrome（:9222）は**収束ループ中は閉じない**。ループ中の chrome-devtools 探索は `connectOverCDP` でこの**生ブラウザに attach** し、test 実走の Playwright runner は採取済み `e2e/.auth/<role>.json`（storageState）を使う。ログイン済み実画面を観測しながら、実走は再現性のある storageState で回す。
+
+  **採取手順（エージェント実行）:**
+
+  1. **`scripts/save-state-cdp.ts` が最新版か確認する。** scaffold は既存プロジェクトに再配置されない（`playwright.config.ts` がある場合は上書きしない）ため、古いコピーが残っていることがある。**失敗メッセージが「cookie/localStorage/IndexedDB すべて0件」ではなく「Cookie が0件」とだけ出るなら旧版**（IndexedDB 非対応 → Firebase 等トークンを IndexedDB に置くアプリで必ず失敗）。その場合 `${CLAUDE_PLUGIN_ROOT}/scaffold/scripts/save-state-cdp.ts` の内容で上書きしてから採取し直す（未配置なら `cp -r "${CLAUDE_PLUGIN_ROOT}/scaffold/scripts" ./scripts`）。
+
+  2. **`9222` の使用状況を確認する。**`pgrep -fl "remote-debugging-port=9222"`。
+     - **未使用** → 次の3でエージェントが debug Chrome を起動する。
+     - **既に稼働中** → 起動し直さず再利用する（この Chrome は他者所有なので後で閉じない／手順6の対象外）。
+
+  3. **エージェントが debug Chrome をバックグラウンド起動し、対象URL（`.env` の `E2E_BASE_URL`）を最初から開く。** Chrome 111+ は `--remote-allow-origins` 必須、zsh では `*` をクオート。macOS 以外はバイナリのパスを読み替える。
+     ```bash
+     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+       --remote-debugging-port=9222 --remote-allow-origins='*' \
+       --user-data-dir=/tmp/e2e-cdp-profile "<E2E_BASE_URL>"
+     ```
+     （既存の普段使い Chrome は**閉じなくてよい**。別 `--user-data-dir` の独立インスタンスとして起動する。）その後 `curl -s http://localhost:9222/json/version` でポート稼働を確認する。
+
+  4. **ユーザーに頼むのはログインだけ。**「起動した窓で対象にログインし、**対象ページを開いたままにしてください**（タブを閉じない・別サイトへ移動しない）。済んだら教えてください」と促す。採取は対象タブを reload して origin を観測するため、**ログイン後にそのタブが開いている**ことが必須。
+
+  5. **ユーザーの合図後、エージェントが採取コマンドを実行する。**`E2E_VERIFY_HOST` は `E2E_BASE_URL` のホストから導出、`E2E_STATE_OUT` はロール名。成功表示は保存場所別内訳（例 `cookies: 0 / localStorage: 1 / indexedDB: 4 (firebaseLocalStorageDb)`）。
+     ```bash
+     E2E_CDP_URL="http://localhost:9222" \
+     E2E_STATE_OUT="e2e/.auth/user.json" \
+     E2E_VERIFY_HOST="app.example.com" \
+     pnpm exec tsx scripts/save-state-cdp.ts
+     ```
+     **複数ロールが要るなら**、同じ窓でログインし直してもらい `E2E_STATE_OUT` を変えて 4→5 を反復する（再起動・再ログイン不要）。
+
+  6. **収束ループ中はこの Chrome を閉じない**（探索が `connectOverCDP` で attach するため）。**全ロールの採取・検証が済み、収束ループ自体が完了してから閉じる**（手順3で自分が起動した場合のみ。手順2で再利用した既存 Chrome は閉じない）。
+
+  > **`connectOverCDP` は IndexedDB を取れない、ではない。** 採取前に対象タブを reload しさえすれば `firebaseLocalStorageDb` 等の IndexedDB まで掬える（reload はスクリプトが自動で行う）。reload せず origins=0 を見て「CDP の限界」と早合点して Firebase Admin SDK 等へ切り替えない。`save-state-cdp.ts` が「cookie/localStorage/IndexedDB すべて0件」を出すのは、対象タブが開いていない／未ログインのときだけ。
+
+### 初回フルラン → 落ちたものだけループ（コスト抑制）
+
+認証確立後、**まず全テストを1回流す**。
+
+```bash
+pnpm exec playwright test e2e/tests/<feature>.spec.ts
+```
+
+- **green のテストは確定**する（そのテスト内の `@guessed` を外す）。
+- **落ちたテストだけ**を収束対象にする。N=3 は「最初から3回」ではなく「**初回失敗テストに追加で最大3回**」。基本7観点なら最悪 7×3=21 巡だが、初回 green 分と後述バックストップで実用域に収まる。
+
+### ループ本体（落ちたテスト1本＝1サブエージェント・直列）
+
+**落ちたテスト1本につき1サブエージェントを直列に切り出す**（`general-purpose` 等、**chrome-devtools MCP + Playwright MCP + Edit + Bash が使える型**）。直列の理由は (a) 破壊的シナリオの `serial` 競合、(b) 同一 spec ファイルの並列編集衝突。**重い snapshot/run_code の出力はサブエージェント内に留め、オーケストレータには「収束したか（最小 diff）／残差か（診断要約）」だけを返させる**（コンテキスト肥大の防止）。
+
+**1 attempt = 次の1巡**（test ごと最大 N=3・既定3・設定可能）:
+
+1. **診断（chrome-devtools MCP）** — `take_snapshot` で a11y ツリー、`list_network_requests` / `list_console_messages` で**実画面の現状・本当の動線・正しい期待値**を観測する。軽量なのでループ毎回の起点。memory「実サイト探索は chrome-devtools MCP 優先（軽量）」に合致。
+2. **焼く前検証（Playwright MCP）** — `browser_run_code_unsafe` の `async (page) => {...}` で、修正案の `getByRole(...)` が**一意に解決するか**・遷移 assert が効くかを **spec へ反映する前に1回試す**。`browser_snapshot` で正しい role/name ロケータの ref を採取できる。これで「外し修正」を spec に焼く前に弾く。
+   > 注: 現行 Playwright MCP に「テスト生成専用ツール」は無い。作成支援の実体は `browser_snapshot`（正しい role/name ロケータ採取）と `browser_run_code_unsafe`（ライブ検証）の2つ。
+3. **spec 最小修正（Edit）** — 検証で通ったロケータ・待機・期待値**だけ**を最小差分で spec に反映する。
+4. **実走（Bash）** — `pnpm exec playwright test --grep "<そのtest>"` でそのテストだけ実走する。
+
+### 出口（test ごとに3分類）
+
+- **(a) 収束** — 実走 green になった → そのテスト内の **`@guessed` を外し確定**する。
+- **(b) N 尽き** — 要素は実在するのにロケータ／待機をどう変えても N 回（既定3）で通らない → **残差化**する（`@guessed` を**残したまま**）。EPT／プロンプト改善行き。Step4 がこの残存マーカーで拾う。
+- **(c) 途中離脱（attempt を消費しない）** — chrome-devtools 観測で次が判明したら、**attempt を消費せず即差し戻す**:
+  - 計画した動線／要素が**実画面に存在しない**（plan/map の漏れ）→ **plan・e2e-map へ差し戻す**。
+  - **state 失効・seed 不整合**（前提データの問題）→ **seed・env へ差し戻す**。
+  - 推測で `goto` 直行やロケータ捏造をして無理に通さない（それは破壊事故・偽 green の元）。
+
+### コスト抑制とバックストップ（暴走防止）
+
+1. **初回フルラン → 落ちたものだけループ**（上記）。
+2. **(c) 早期離脱は attempt 非消費**（plan/seed 起因の失敗で N を空費しない）。
+3. **1テスト＝1サブエージェント直列**で重い出力を隔離（上記）。
+4. **スイート全体のバックストップ上限（既定 = テスト数 × 3）** を置く。累計 attempt がこれを超えたら、残りは探索せず **Step4 残差へ流す**。
+
+### @guessed の寿命（再掲・重要）
+
+`@guessed` は「実画面未観測」の生存フラグ。**(a)収束で外し、(b)残差では残す。** Step4 はこの残存マーカーで残差集合を機械的に拾うので、**収束したのに外し忘れると Step4 が誤って残差に数える**。外し漏れ・付け漏れに注意する。
+
+### 収束ループの N=3 は flaky 再評価とは別物（混同しない）
+
+この収束ループの N=3 は**「通すために直す」反復**（修正を挟む）。Step4 の **flaky 再評価（同一条件・無修正で3回）** は**「通った重要シナリオの安定性確認」**で、**別物**。収束ループで直したテストを「3回流したから安定」と読み替えない——安定性確認は Step4 が**無修正**で行う。
+
+完了したら Step4（`e2e-run`）へ。**渡すのは「収束済みスイート＋残差（残 `@guessed` を含む失敗テスト）の一覧」**。認証は既に確立済みなので、Step4 は人間タスクを原則出さない（state 失効時の再採取のみ）。

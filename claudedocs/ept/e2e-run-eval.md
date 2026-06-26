@@ -72,3 +72,12 @@ executor: general-purpose（sonnet）× 2 並列・隔離。両者 `tool_uses=0`
 - 本文/description は **無編集**（Iter-0 で fix 不要と判定済み）。修正すべき失敗が baseline で出ていないため、**diff を当てる Iter-2 は不要**＝ **e2e-run は Iter-1 で収束**（成熟スキルの早期収束。`map-run-ept-plan.md` の打ち切り基準に合致）。
 
 > 補足: 実 `npx playwright test` の実行品質・実 trace パースは EPT スコア外。収束後の非スコア smoke で別途確認可能（任意）。
+
+---
+
+## 構造変更（2026-06-26）: 残差処理への純化 — 既存収束ベースラインは superseded
+
+設計変更（収束ループ追加・`e2e-codegen-eval.md` 末尾参照）に連動し、e2e-run を**実行修正ループ削除**＋「残差分類＋証跡収集＋Coverage Matrix＋flaky 再評価」へ純化した。上記 Iter-1 収束判定の前提（=実行＋6分類＋承認後に最小修正するスキル）を変えるため、**上記ベースラインは superseded。次回 EPT は新責務で取り直す。**
+
+- **本文 diff（run）**: ①CDP 手動 state 採取手順（旧「実行前の人間タスク」節）を e2e-codegen の収束ループ入口へ**移設・削除**。認証は Step3 確立済みとし、Step4 は原則ノータスク（prebuilt-state の state 失効時のみ再採取）。②分類対象を「残差＝残 `// @guessed` の失敗のみ」に限定（収束済みは対象外）。残差の機械的特定手順（`grep @guessed` × 失敗 test）を追加。③6分類の spec 系（ロケータ破損／待機不足）の修正先を「Step4 でその場パッチ」から「**Step3 収束ループへ戻す**」に変更。④承認ゲート②を「修正方針承認」から「**残差の処遇方針承認（EPT行き / plan・map 差し戻し / seed・env 差し戻し）**」へ純化——全収束なら実質スルー。⑤「flaky 再評価（無修正3回）≠ 収束ループの N=3」を明記。
+- **次回 EPT の観点案**: 残差の機械的拾い上げ（@guessed 残存×失敗の突合）の正確さ、収束済み/残差の弁別、その場パッチ抑止（Step3 戻し判断）、flaky 再評価と収束 N=3 の非混同。実走・実 trace を伴うため**実 smoke 寄りの検証**が要る。

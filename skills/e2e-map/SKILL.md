@@ -60,7 +60,7 @@ argument-hint: <feature-name> [対象URL / PRDパス / seed test]
 
 1. **ログイン手段を「利用者が観測できる言葉」で確定する** — 必須の問いはこの二択だけ:「ログインは**メールアドレス＋パスワードを画面に入力する形式**か？」
    - **はい** → `E2E_AUTH_MODE=form`。`auth.setup.ts` が env の資格情報で自動ログインし、storageState を自動採取する。
-   - **いいえ**（SSO／外部IdP・OTP・2FA・magic link・生体認証 等）→ `E2E_AUTH_MODE=prebuilt-state`。利用者が手元で CDP スクリプト（`save-state-cdp.ts`）により手動採取してからテストを作成する（README のフォールバック手順）。**予告: この方式では後で手元での storageState 採取（実 Chrome 起動＋手動ログイン）が必要になる。具体手順は Step4 直前に案内する**（form/none では不要）。
+   - **いいえ**（SSO／外部IdP・OTP・2FA・magic link・生体認証 等）→ `E2E_AUTH_MODE=prebuilt-state`。利用者が手元で CDP スクリプト（`save-state-cdp.ts`）により手動採取してからテストを作成する（README のフォールバック手順）。**予告: この方式では後で手元での storageState 採取（実 Chrome 起動＋手動ログイン）が必要になる。具体手順は Step3（収束ループ入口）で案内する**（form/none では不要）。
    - **保存場所（cookie / localStorage / IndexedDB）は問わない。** 採取は3種すべてを自動でカバーするため、ここで宣言させない。Firebase 等トークンを **IndexedDB** に置くアプリも form 自動採取で対応される（Playwright の `storageState({ indexedDB: true })`、1.51+）。
    - form を選んでも、自動ログインが **bot 検知 / captcha** で弾かれたら `prebuilt-state`（手動採取）へフォールバックする。
 2. **ロール一覧を確定する** — `未ログイン` / `一般ユーザー` / `管理者` など。ここで挙げたロールが Step2 の **permission差分クラス**の素地になる。
