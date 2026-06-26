@@ -65,10 +65,12 @@ E2E_PASS=        # 同上
   - **作成 UI で出る空行のフォーカスへ `page.keyboard.type(...)` で直接入力**（要素を取り直さない）、または
   - **件数の増加を待ってから新規行を特定**: 操作前に件数を控え、`await expect(rows).toHaveCount(before + 1)` で増加を待ってから `rows.nth(before)` を対象にする。この件数ガードは安全な取得であると同時に、`.last()` が既存行を改名した場合は件数が増えないため `toHaveCount` が落ちて**偽陽性（green なのに破壊）を検出する**役目も果たす。
 - **待機**: web-first assertion（`await expect(locator).toBeVisible()` など）で待つ。`waitForTimeout` の固定待機は使わない。**重い SPA では `page.goto()` / `page.reload()` の既定 `load` 待ちが長く test timeout に当たりやすい** ので、`{ waitUntil: 'domcontentloaded' }` を指定して描画後の web-first assertion で待つ（読み込み完了の判定は assertion 側に寄せる）。
+- **遷移を伴うクリックの直後は、遷移先ロケータを触る前に遷移自体を assert する**: URL 変化や SPA 画面切替を起こすクリック（`getByRole('button', { name: '回答する' }).click()` 等）の **次の行で、遷移先にだけ存在する要素を触る前に** `await expect(page).toHaveURL(/遷移先/)` か遷移先固有要素の `await expect(...).toBeVisible()` を**1行置く**。`click()` は「クリックした」だけで遷移完了を待たないため、これを省くと**まだ遷移前のページ上で次の要素を探し始め**、その要素が遷移前ページに無いと `element(s) not found` で落ちる（実検証で「`回答する` クリック後すぐ `次のページへ` を探し agreement ページのまま落ちた」直接原因）。**判断に迷うなら置く**（過剰でも害は小さい）。**`waitForLoadState('networkidle')` は使わない**——Playwright 非推奨で、SPA ではネットワークが永久に idle にならない／逆に描画前に idle になり flaky。遷移の確証は「遷移先の URL/要素」を web-first で assert することで取る。
 - **best-effort な `.click().catch(() => {})` で握りつぶさない（hook 全滅の原因）**: バナー閉じ等を `getByRole(...).click().catch(() => {})` のように書いても **`.catch()` は hang を救わない**。要素が actionability（可視・有効・非オーバーレイ）を満たさないと `click` は test timeout（既定30s）までブロックし、`.catch()` が効く前に `beforeEach`/`afterEach` ごとタイムアウトさせて全テストを巻き込む（実検証で6件全滅の直接原因）。代替:
   - **`count()` / `isVisible()` で存在・可視を確認してからのみ操作する**（不在ならスキップ）、
   - どうしても best-effort にするなら **`{ timeout: 1500 }` 等の短い timeout を明示**して hang を防ぐ、
   - **そもそも検証に干渉しない要素は無理に閉じない**（閉じる必要があるか自体を判断する）。
+- **`page.goto()` は「入口」専用。価値フロー途中の画面遷移は UI を辿る**: `goto()` を使ってよいのは (a) シナリオの **開始状態**（`開始状態` の入口 URL／storageState 前提で直接開く）と (b) teardown の**新規 context 起点**だけ。**シナリオの `操作` 列に現れる画面遷移（例: エディタ→設定に戻る）は、対応する UI（リンク・ボタン・ヘッダー/グローバルナビ）を実際に click して辿る**。ここを `goto(設定URL)` で直行すると**ユーザー動線（その遷移導線自体の検証）を飛ばす**ため、価値フローの一部である遷移は UI 経由で踏む。遷移後は上記「遷移を伴うクリックの直後」ルールで遷移先を assert する。
 - **アサーション**: URL・表示・値・ARIA・視覚差分のうち**最小十分な組み合わせ**。plan の「中間観測点」「終了条件」を assertion に対応させる。
 - **中間観測点は「既知ロケータで検証できるものを必ず active assert する」**: ボタンの `toBeDisabled()`（二重押下不可）・URL 変化・件数・toast/alert など、**ロケータが確定できる観測点はコメントに逃さず実アサートする**。コメント提案に留めてよいのは、アプリ固有でセレクタが確定できない要素だけ。**ローディング/スケルトンの中間観測点は、まず標準 role `getByRole('progressbar')` / `getByRole('status')` を第一候補に active assert を試み**、それでも拾えない場合のみコメント提案に降格する。遅延・送信中シナリオは「ローディングが出る/操作がブロックされる」ことの検証が中核なので、ここを丸ごとコメントにすると happy path と区別がつかなくなる。
 - **視覚差分が重要なシナリオ**（色・強調・レイアウト・Canvas）には `await expect(page).toHaveScreenshot()` の併用候補を**コメントで提案**する。DOM で拾えない視覚は Midscene 等の拡張フック点も併記（README参照）。
@@ -172,7 +174,9 @@ test.describe('<feature>', () => {
 - [ ] **各 test に横断 coverage タグ `tag: ['@feature:<slug>', '@class:<slug>', '@role:<slug>']` があり、値が plan の `coverage`（class/role）と一致するか**（audit の集計用・省略禁止／`annotations` ではなく `tag`）
 - [ ] **破壊的・自己完結シナリオの describe に `test.describe.configure({ mode: 'serial' })` が付いているか**
 - [ ] CSS/XPath ロケータが残っていないか（残すなら理由をコメント）
-- [ ] 固定待機（`waitForTimeout`）が無いか
+- [ ] 固定待機（`waitForTimeout`）・`waitForLoadState('networkidle')` が無いか
+- [ ] **遷移を伴うクリックの直後に、遷移先ロケータを触る前の遷移 assert（`toHaveURL` か遷移先固有要素の `toBeVisible`）があるか**
+- [ ] **`page.goto()` を「入口（開始状態）」「teardown の新規 context 起点」以外で使っていないか**（操作列の途中遷移を goto で飛ばしていないか／UI を辿っているか）
 - [ ] **出現待ちをしない `nth()`/`last()`/`first()` で新規行・未確定要素を掴んでいないか**（新規作成は keyboard 直接入力 or `toHaveCount(before+1)` 待ち→`nth`）
 - [ ] **best-effort な `.click().catch(()=>{})` で hang を握りつぶしていないか**（存在確認後のみ操作 / 短い timeout 明示 / そもそも閉じない）
 - [ ] 各 test に「終了条件」に対応する assertion があるか

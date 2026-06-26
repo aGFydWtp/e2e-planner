@@ -66,8 +66,8 @@ pnpm exec playwright test e2e/tests/<feature>.spec.ts
 
 | 分類 | 典型症状 | 修正先 |
 |------|----------|--------|
-| ロケータ破損 | 要素が見つからない / DOM変更で壊れた | generator / spec（role/text/testid へ） |
-| 待機不足 | submit直後にassert / AJAX前に次操作 | generator / spec（web-first assertion） |
+| ロケータ破損 | 要素が見つからない / DOM変更で壊れた／**遷移途中の導線リンクが今の画面に無い** | generator / spec（role/text/testid へ）。**途中遷移は goto で飛ばさず実画面探索で動線再発見（下記）** |
+| 待機不足 | submit直後にassert / AJAX前に次操作／**遷移を伴うクリック直後に遷移先要素を触り遷移前ページのまま落ちる** | generator / spec（**遷移先 URL/要素を1行 assert してから次操作**。`networkidle` は使わない） |
 | 前提データ不整合 | ログイン状態・権限・DB状態が違う／**storageState 失効・セッション切れ（setup未実行・state期限切れ・サイト側ログアウト）** | seed / environment / auth.setup（prompt では直さない） |
 | 期待値誤り | assertion の期待値が仕様と不一致 | spec または plan（仕様の見直し） |
 | 視覚baseline未作成 | toHaveScreenshot 初回で baseline 無し | **不具合ではない**。baseline を生成して確定 |
@@ -128,6 +128,9 @@ pnpm exec playwright test e2e/tests/<feature>.spec.ts
 ## 修正（承認ゲート②の後）
 
 失敗分類表を提示し、**ユーザーが修正方針を承認してから**最小差分で直す。分類ごとに修正先が違う（探索不足・状態遷移漏れは plan / e2e-map へ差し戻し、ロケータ・待機は spec、前提データは seed/env）。healer に plan 由来の漏れまで背負わせない。
+
+- **遷移を伴うクリック直後の落ち（待機不足）は、`networkidle` 待ちでなく遷移 assert で直す。** 該当クリックの次行に `await expect(page).toHaveURL(/遷移先/)`（または遷移先固有要素の `toBeVisible()`）を1行入れ、遷移先ロケータを触る前に遷移完了を待たせる（e2e-codegen の待機方針に揃える）。`waitForLoadState('networkidle')` は使わない（Playwright 非推奨・SPA で flaky）。
+- **途中遷移のリンクが今の画面に無い（ロケータ破損）ときは、`page.goto()` で飛ばさない。** これはシナリオの `操作` 列の一部（価値フローの遷移導線そのもの）なので、**実画面を chrome-devtools MCP 等で探索し、ヘッダー/グローバルナビ等の実動線を見つけて click で辿る**よう直す。`goto()` への置換が許されるのはシナリオの**入口（開始状態）**だけ（e2e-codegen の goto 境界に揃える）。動線が探索しても確定できないなら、推測で goto せず plan / e2e-map へ差し戻す。
 
 ## 再評価（推奨）
 
