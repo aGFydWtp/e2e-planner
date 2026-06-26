@@ -38,14 +38,39 @@ npx playwright test e2e/tests/<feature>.spec.ts
 >
 > **teardown が実機で確立する（検証アサートが安定して green になる）まで、破壊的シナリオを本番類似環境で回さない。** 捨てプロジェクト/捨て環境で teardown 発火を確認してから本番へ向ける（e2e-codegen 参照）。
 
+## Coverage Matrix（plan↔spec↔実行結果の突合）
+
+失敗分類の前に、**何を検証できていて何が欠けているか**を Coverage Matrix で一覧化する。3つの情報源を突合して作る:
+
+1. **plan**（`e2e/plans/<feature>.md`）— シナリオ ID（S1..Sn）と各シナリオの遷移マップ参照（`map#<m>`）・中間観測点・終了条件。
+2. **spec 内タグ**（`e2e/tests/<feature>.spec.ts`）— 各 `test()` タイトル/近接コメントの `[S<n> / map#<m>]` を機械的に逆引きして、シナリオと test を対応づける。
+3. **実行結果** — 各 test の pass/fail と証跡パス。
+
+| 遷移map # | scenario | test | 中間観測点assert | 終了条件assert | 証跡 | 結果 |
+|-----------|----------|------|------------------|----------------|------|------|
+| #2 | S1 ログイン成功 | `logs in with valid credentials` | ✓ ローディング表示 | ✓ /dashboard 遷移 | trace.zip | pass |
+| #4 | S2 検証エラー | `shows validation error...` | ✓ API未呼出 | ✓ 検証メッセージ | - | pass |
+| #5 | S8 権限差分 | （未突合） | 未突合 | 未突合 | - | 未突合 |
+
+- **突合できなかった行は捏造せず「未突合」と明記する。** plan にあるが対応する spec タグが見つからない（=未実装/タグ漏れ）、逆に spec にあるが plan に対応シナリオが無い、実行されず結果が無い——いずれも該当セルを `未突合` とし、空欄や推測値で埋めない。未突合は「漏れの可視化」が目的なので、隠さず残す。
+- 中間観測点/終了条件の `assert` 列は、plan の各観測点に対応する assertion が spec に**実在するか**を見る（`✓`=active assert あり / `コメントのみ` / `無し`）。
+- spec に `[S<n> / map#<m>]` タグが無くて逆引きできない場合は、その旨を Coverage Matrix の冒頭に記し、e2e-codegen のタグ付け規約に差し戻す。
+
 ## 成果物
 
-`e2e/reports/<feature>-<YYYYMMDD-HHmm>.md` に失敗分類表と証跡パスを書く。
+`e2e/reports/<feature>-<YYYYMMDD-HHmm>.md` に Coverage Matrix・失敗分類表・証跡パスを書く。
 
 ```markdown
 # E2E 実行レポート: <feature>
 
 > 実行日時: <YYYY-MM-DD HH:mm> / 結果: <N passed / M failed>
+
+## Coverage Matrix
+
+| 遷移map # | scenario | test | 中間観測点assert | 終了条件assert | 証跡 | 結果 |
+|-----------|----------|------|------------------|----------------|------|------|
+| #2 | S1 ログイン成功 | `logs in with valid credentials` | ✓ ローディング | ✓ /dashboard | trace.zip | pass |
+| #5 | S8 権限差分 | （未突合） | 未突合 | 未突合 | - | 未突合 |
 
 ## 失敗分類
 

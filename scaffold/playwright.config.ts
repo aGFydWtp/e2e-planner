@@ -1,4 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
+import { config as loadEnv } from 'dotenv';
+
+// .env があれば読む。無くても CI 等の実環境変数で動く（防御的ロード）。
+// 順序重要: ここで .env を読んでから下の E2E_AUTH_MODE / E2E_BASE_URL を参照する。
+loadEnv();
 
 /**
  * e2e-planner scaffold の推奨設定。
@@ -7,6 +12,13 @@ import { defineConfig, devices } from '@playwright/test';
  * - VRT（toHaveScreenshot）の差分しきい値を控えめに設定
  * baseURL は環境変数 E2E_BASE_URL で上書きする。
  */
+
+// 認証モードで projects 構成を切り替える（E2E_AUTH_MODE、既定 'form'）。
+//   form           : setup project が form ログイン → storageState を自動生成（dependencies:['setup']）
+//   prebuilt-state : SSO/OTP 等で手動採取した e2e/.auth/user.json を使う（setup を組まない・dependencies 空）
+//   none           : 認証不要（storageState を持たない）
+const authMode = process.env.E2E_AUTH_MODE ?? 'form';
+
 export default defineConfig({
   testDir: './e2e/tests',
   outputDir: './e2e/.artifacts',
@@ -39,20 +51,25 @@ export default defineConfig({
     toHaveScreenshot: { maxDiffPixelRatio: 0.01, animations: 'disabled' },
   },
   projects: [
-    // ① 認証セットアップ。テスト本体より先に1回走り、storageState を e2e/.auth/ に保存する。
-    //    認証不要なアプリなら、この project と下の dependencies を丸ごと削除してよい。
-    { name: 'setup', testMatch: /auth\.setup\.ts/ },
+    // ① 認証セットアップ。form モードのときだけ組む。テスト本体より先に1回走り、
+    //    storageState を e2e/.auth/ に保存する。
+    //    prebuilt-state（SSO/OTP 等で手動採取した user.json を使う）/ none（認証不要）では
+    //    setup を組まない（前者は採取済みの state、後者は state を持たない）。
+    ...(authMode === 'form' ? [{ name: 'setup', testMatch: /auth\.setup\.ts/ }] : []),
 
-    // ② 認証済みテスト（user ロール）。setup の出力した state を前提に開始する。
+    // ② 認証済みテスト（user ロール）。
+    //    form/prebuilt-state は state を前提に開始し、none は空 state で開始する。
     {
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
         // ログイン済みセッションを焼き付けた state を全テストの開始状態にする。
         // → 各テストでログイン操作を踏まない（ログインフロー検証だけは別扱い、下記参照）。
-        storageState: 'e2e/.auth/user.json',
+        // none モードのみ state を持たない（空の cookies/origins で開始）。
+        storageState: authMode === 'none' ? { cookies: [], origins: [] } : 'e2e/.auth/user.json',
       },
-      dependencies: ['setup'],
+      // form のみ setup の完了を待つ。prebuilt-state は手動採取済み、none は state 不要なので依存しない。
+      dependencies: authMode === 'form' ? ['setup'] : [],
     },
 
     // ③ 未ログイン状態を検証するテスト（ログイン画面・検証エラー・権限なしリダイレクト等）。

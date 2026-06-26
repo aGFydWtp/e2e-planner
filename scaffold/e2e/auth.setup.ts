@@ -19,6 +19,8 @@ import { test as setup, expect } from '@playwright/test';
  * ── SSO / OTP / 2FA で form 自動化できない場合 ────────────────────
  * このファイルでは自動化しない。手動で1回ログインして state を取り出すか、
  * API ログイン（request.post でトークン取得 → state 注入）に置き換える。手順は README 参照。
+ * その場合は playwright.config.ts を E2E_AUTH_MODE=prebuilt-state で動かす
+ * （setup project を組まず、手動採取した e2e/.auth/user.json をそのまま使う）。
  */
 
 const USER = process.env.E2E_USER ?? 'user@example.com';

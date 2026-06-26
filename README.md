@@ -126,6 +126,18 @@ cat "${CLAUDE_PLUGIN_ROOT}/scaffold/.gitignore"                   # 既存 .giti
 - `scaffold/playwright.config.ts` は **setup project ＋ `dependencies:['setup']` ＋ `storageState`** 構成済み。
 - **`.env` と `e2e/.auth/` は絶対コミットしない**（ログイン済みセッション＝秘密情報）。`.gitignore` に登録される。
 
+#### 認証モード（`E2E_AUTH_MODE`）
+
+`playwright.config.ts` は `E2E_AUTH_MODE`（既定 `form`）で projects 構成を切り替える。`.env`（または実行時の環境変数）で指定する:
+
+| モード | setup project | storageState | dependencies | 用途 |
+|--------|---------------|--------------|--------------|------|
+| `form`（既定） | あり | `e2e/.auth/user.json` | `['setup']` | form ログインを `auth.setup.ts` が自動化して state を生成 |
+| `prebuilt-state` | なし | `e2e/.auth/user.json` | なし | **SSO/OTP/2FA** 等で手動採取（後述の CDP 方式）した state を使う |
+| `none` | なし | 空（`{cookies:[],origins:[]}`） | なし | 認証不要なアプリ |
+
+SSO 等で form 自動化できないアプリは `E2E_AUTH_MODE=prebuilt-state` にし、下記の `save-state-cdp.ts` で採取した `e2e/.auth/user.json` を使う。
+
 ### ロール（権限差分）
 
 `auth.setup.ts` に role ごとの setup を足して `e2e/.auth/<role>.json` を保存し、config に role 別 project（`storageState` 指定）を足す。未ログイン検証は state を持たない project（`*.guest.spec.ts` 等）で実行する。雛形にコメント例あり。参考実装は [`examples/login.setup.ts`](examples/login.setup.ts) / [`examples/login.spec.ts`](examples/login.spec.ts)。
