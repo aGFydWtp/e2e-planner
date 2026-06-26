@@ -17,6 +17,8 @@ argument-hint: <feature-name>
 
 - **`prebuilt-state`（SSO/OTP/2FA 等）** → CDP 経由の手動 state 採取が必要。次の具体手順を提示し、`e2e/.auth/<role>.json` が採取されるまで実行しない（詳細は `e2e-codegen/SKILL.md` の storageState レシピ／`scaffold/scripts/save-state-cdp.ts` 参照）:
 
+  - **先に `scripts/save-state-cdp.ts` が最新版か確認する。** scaffold は既存プロジェクトに再配置されない（`playwright.config.ts` がある場合は上書きしない）ため、過去に展開した古いコピーが残っていることがある。**失敗メッセージが「cookie/localStorage/IndexedDB すべて0件」ではなく「Cookie が0件」とだけ出るなら旧版**（IndexedDB 非対応 → Firebase 等トークンを IndexedDB に置くアプリでは必ず失敗する）。その場合は `scaffold/scripts/save-state-cdp.ts` の内容で上書きしてから採取し直す。
+
   ```bash
   cp -r "${CLAUDE_PLUGIN_ROOT}/scaffold/scripts" ./scripts   # 未配置なら
   # 1) debug ポート付きの実 Chrome を起動（既存 Chrome は閉じる。Chrome 111+ は --remote-allow-origins 必須、zsh では * をクオート）
