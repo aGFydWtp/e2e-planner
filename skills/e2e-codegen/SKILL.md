@@ -1,6 +1,6 @@
 ---
 name: e2e-codegen
-description: E2Eワークフロー Step3。承認済みの Markdown plan を Playwright の .spec.ts へ変換する。ロケータは role/text/testid 優先、非同期は web-first assertion、視覚差分は toHaveScreenshot 併用候補をコメント提案。生成後に selector と assertion を自己点検する。
+description: E2Eワークフロー Step3。承認済みの Markdown plan を Playwright の .spec.ts へ変換する。ロケータは role/text/testid 優先、非同期は web-first assertion、視覚差分は toHaveScreenshot 併用候補をコメント提案。未出現要素を nth/last/first で掴まない。破壊的・自己完結シナリオは UI経路の teardown（認証済み context・末尾に消滅検証）まで生成する。生成後に selector と assertion を自己点検する。
 when_to_use: e2e-spec の plan が承認された後、Playwright テストコードを生成するとき。e2e-plan オーケストレーターの Step3 として。
 argument-hint: <feature-name>
 ---
@@ -67,6 +67,7 @@ npm i -D @playwright/test && npx playwright install
   - どうしても best-effort にするなら **`{ timeout: 1500 }` 等の短い timeout を明示**して hang を防ぐ、
   - **そもそも検証に干渉しない要素は無理に閉じない**（閉じる必要があるか自体を判断する）。
 - **アサーション**: URL・表示・値・ARIA・視覚差分のうち**最小十分な組み合わせ**。plan の「中間観測点」「終了条件」を assertion に対応させる。
+- **中間観測点は「既知ロケータで検証できるものを必ず active assert する」**: ボタンの `toBeDisabled()`（二重押下不可）・URL 変化・件数・toast/alert など、**ロケータが確定できる観測点はコメントに逃さず実アサートする**。コメント提案に留めてよいのは、アプリ固有でセレクタが確定できない要素だけ。**ローディング/スケルトンの中間観測点は、まず標準 role `getByRole('progressbar')` / `getByRole('status')` を第一候補に active assert を試み**、それでも拾えない場合のみコメント提案に降格する。遅延・送信中シナリオは「ローディングが出る/操作がブロックされる」ことの検証が中核なので、ここを丸ごとコメントにすると happy path と区別がつかなくなる。
 - **視覚差分が重要なシナリオ**（色・強調・レイアウト・Canvas）には `await expect(page).toHaveScreenshot()` の併用候補を**コメントで提案**する。DOM で拾えない視覚は Midscene 等の拡張フック点も併記（README参照）。
 - **前提データ**: 認証状態は storageState / fixture で固定し、テスト内に外部依存を持ち込まない。認証必須画面は `test.use({ storageState })` を前提にし、テスト内でログインフローを踏まない。
 - **ロケール/タイムゾーン**: ローカライズされた文言（ボタン名・メッセージ）や日付を assert するなら、`playwright.config.ts` の `use.locale`/`timezoneId` を**探索環境と同じ値に固定**すること。固定しない場合は headless 既定（en-US/UTC）で描画され、日本語前提の assert が「環境依存」で落ちる。固定できない場合はロケール非依存の検証（URL・role・testid）に寄せる。
