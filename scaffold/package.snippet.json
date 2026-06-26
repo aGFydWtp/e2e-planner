@@ -8,6 +8,7 @@
     "e2e:update-snapshots": "playwright test --update-snapshots"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.0"
+    "@playwright/test": "^1.49.0",
+    "dotenv": "^16.4.0"
   }
 }

@@ -76,6 +76,7 @@ npm i -D @playwright/test && npx playwright install
 
 Step2（e2e-spec）で「自己完結」と確定したシナリオは、**setup → 検証 → teardown を1本のテストとして純 E2E（UI経由）で生成**する。**ここでの方針判断は Step2 が済ませている。codegen は確定済み方針に従うだけで、勝手な判断をしない。**
 
+- **破壊的・自己完結シナリオの describe には `test.describe.configure({ mode: 'serial' })` を付ける。** `playwright.config.ts` は `fullyParallel: true` のため、同一データ空間に作用する作成/更新/削除テストを並列実行すると、別テストが作った/消した行と競合して flaky になる。serial で同 describe 内を直列化し、競合を避ける。**これは応急処置である。** 本来は各テストが**自分専用の隔離データ**（テストごとにユニークなアカウント/プロジェクト/seed）を setup で用意し teardown で消すことで、並列のまま安全にするのが筋。隔離が用意できない段階での暫定手段が serial だと理解しておく。
 - **勝手に `test.skip` ガードで黙らせない。** 破壊的だからといって codegen の判断でテストを眠らせるのは禁止。除外は Step2 でユーザーが決めたものだけ（除外シナリオはそもそも生成しない）。skip で「書いたが動かない」テストを残さない。
 - **setup / teardown は UI 経由（純 E2E）で書く。** 作成も削除も**実際のユーザー操作経路**で踏む。`afterEach` / `afterAll` で、**作成したのと同じ UI 経路**で削除する（削除 UI を踏むこと自体が価値フローの検証になる）。DB 直叩きや API ショートカットで後始末しない（純 E2E のため）。
 - **削除操作 self は best-effort、ただし「消えたこと」の検証は必須。** 後始末の削除クリック自体は `try/catch` で囲み、失敗してもテスト本体は落とさず**警告ログに留める**（teardown 失敗で本検証の結果が隠れないように）。**だが best-effort で握りつぶすだけだと、teardown が実機で発火していなくても green のまま残骸が蓄積する**（実検証で削除メニューが実 DOM で発火せず残骸が溜まった）。これを顕在化させるため、後始末の最後に **`await expect(page.getByText(name)).toHaveCount(0)` で「作成名がもう存在しない」ことを検証する一文を必ず置く**。この検証が落ちれば「teardown が実際には効いていない」とテスト失敗として気づける。「書いただけ」の teardown を信用しない。
@@ -86,9 +87,10 @@ Step2（e2e-spec）で「自己完結」と確定したシナリオは、**setup
 ```ts
 // S4. タスク作成→完了（破壊的・自己完結） plan で「自己完結」確定済み
 test.describe('task lifecycle', () => {
+  test.describe.configure({ mode: 'serial' });  // 破壊的シナリオは直列化（fullyParallel 下での競合回避・応急処置）
   const name = `e2e-task-${Date.now()}`;   // ユニーク名で残骸特定可能に
 
-  test('creates, completes, then deletes a task via UI', async ({ page }) => {
+  test('creates, completes, then deletes a task via UI [S4 / map#4]', async ({ page }) => {
     await page.goto('/tasks');
     await page.getByRole('button', { name: '新規' }).click();
     await page.getByLabel('タイトル').fill(name);
@@ -122,15 +124,18 @@ test.describe('task lifecycle', () => {
 
 ## 成果物
 
-`e2e/tests/<feature>.spec.ts`。plan の各シナリオ（S1, S2, ...）を `test()` に1対1で対応させ、コメントに対応する plan のシナリオ番号を残す。
+`e2e/tests/<feature>.spec.ts`。plan の各シナリオ（S1, S2, ...）を `test()` に1対1で対応させる。
+
+- **各 `test()` のタイトル末尾に Coverage タグ `[S<n> / map#<m>]` を埋め込む**（例: `[S1 / map#2]`）。`S<n>` は plan のシナリオ番号、`map#<m>` は対応する遷移マップ行の番号。**Step4（e2e-run）の Coverage Matrix がこのタグを機械的に逆引きして plan↔spern を突合する**ので、省略しない。シナリオが複数の遷移マップ行に跨るなら `[S3 / map#3,#5]` のように併記する。対応する遷移マップ行が無い（plan 起点で足したシナリオ等）なら `map#-` と書く。
+- タイトルに置けない事情があれば直前の近接コメントに同じタグを書く（タイトル優先）。
 
 ```ts
 import { test, expect } from '@playwright/test';
 
 // plan: e2e/plans/<feature>.md
 test.describe('<feature>', () => {
-  // S1. ログイン成功（happy path）
-  test('logs in with valid credentials', async ({ page }) => {
+  // S1. ログイン成功（happy path） / 遷移マップ #2
+  test('logs in with valid credentials [S1 / map#2]', async ({ page }) => {
     await page.goto('/login');                    // 開始状態
     await page.getByLabel('メールアドレス').fill('user@example.com');
     await page.getByLabel('パスワード').fill('password');
@@ -141,8 +146,8 @@ test.describe('<feature>', () => {
     // 視覚差分が重要なら: await expect(page).toHaveScreenshot('dashboard.png');
   });
 
-  // S2. 必須項目未入力（validation error）
-  test('shows validation error when fields are empty', async ({ page }) => {
+  // S2. 必須項目未入力（validation error） / 遷移マップ #4
+  test('shows validation error when fields are empty [S2 / map#4]', async ({ page }) => {
     await page.goto('/login');
     await page.getByRole('button', { name: 'ログイン' }).click();
     await expect(page.getByText('メールアドレスを入力してください')).toBeVisible();
@@ -154,6 +159,8 @@ test.describe('<feature>', () => {
 
 生成したら次を自分でチェックし、問題があれば直す:
 - [ ] 全シナリオ（plan の S1..Sn）が test として存在するか
+- [ ] **各 test タイトル（または近接コメント）に Coverage タグ `[S<n> / map#<m>]` があるか**（run の突合用・省略禁止）
+- [ ] **破壊的・自己完結シナリオの describe に `test.describe.configure({ mode: 'serial' })` が付いているか**
 - [ ] CSS/XPath ロケータが残っていないか（残すなら理由をコメント）
 - [ ] 固定待機（`waitForTimeout`）が無いか
 - [ ] **出現待ちをしない `nth()`/`last()`/`first()` で新規行・未確定要素を掴んでいないか**（新規作成は keyboard 直接入力 or `toHaveCount(before+1)` 待ち→`nth`）
