@@ -12,7 +12,7 @@ import { test as setup, expect } from '@playwright/test';
  * 管理者など別ロールが必要なら、もう1つ setup を足して別ファイルに保存する:
  *   setup('authenticate as admin', async ({ page }) => {
  *     ... admin で同じ手順 ...
- *     await page.context().storageState({ path: 'e2e/.auth/admin.json' });
+ *     await page.context().storageState({ path: 'e2e/.auth/admin.json', indexedDB: true });
  *   });
  * playwright.config.ts の projects に role ごとの storageState を割り当てる。
  *
@@ -38,5 +38,8 @@ setup('authenticate as user', async ({ page }) => {
   await expect(page).toHaveURL(/\/dashboard/);
   await expect(page.getByRole('heading', { name: 'ダッシュボード' })).toBeVisible();
 
-  await page.context().storageState({ path: STORAGE_STATE });
+  // indexedDB:true で cookie/localStorage に加え IndexedDB スナップショットも採取する。
+  // Firebase Auth など認証トークンを IndexedDB に置くアプリでも、ここで採取できる
+  // （Playwright 1.51+。復元は playwright.config の storageState 指定だけで自動）。
+  await page.context().storageState({ path: STORAGE_STATE, indexedDB: true });
 });

@@ -135,6 +135,8 @@ cat "${CLAUDE_PLUGIN_ROOT}/scaffold/.gitignore"                   # 既存 .giti
 - `auth.setup.ts` が env（`E2E_USER`/`E2E_PASS`）で form ログインし `e2e/.auth/user.json` を保存する。
 - `scaffold/playwright.config.ts` は **setup project ＋ `dependencies:['setup']` ＋ `storageState`** 構成済み。
 - **`.env` と `e2e/.auth/` は絶対コミットしない**（ログイン済みセッション＝秘密情報）。`.gitignore` に登録される。
+- **採取は cookie / localStorage / IndexedDB の3種すべてを自動カバー**する（`storageState({ indexedDB: true })` 常時 ON）。Firebase など認証トークンを **IndexedDB**（`firebaseLocalStorageDb`）に置くアプリも、特別なモードを足さず form 自動採取・CDP 手動採取いずれでも採れる。復元も `storageState:` 指定だけで自動（自前注入は不要）。
+- **Playwright は 1.51 以上が必須**（IndexedDB 採取 `indexedDB: true` が 1.51 で追加されたため）。`scaffold/package.snippet.json` は `@playwright/test ^1.51.0` を指定する。
 
 #### 認証モード（`E2E_AUTH_MODE`）
 
@@ -172,6 +174,8 @@ npx tsx scripts/save-state-cdp.ts
 ```
 
 ロールごとに `E2E_STATE_OUT` を変えて複数回実行する。API ログインが可能ならそちら（`request.post` でトークン取得→state 注入）でもよい。
+
+> **採取の成功判定は Cookie だけを見ない。** `E2E_VERIFY_HOST` を指定すると、その host に紐づく **cookie / localStorage / IndexedDB のいずれか**に痕跡があれば成功とみなす（3種すべて空のときだけ「ログイン済みセッション無し」で失敗）。これにより Cookie を使わず IndexedDB にトークンを置く Firebase 等のアプリでも正しく成功判定できる。出力は保存場所別の内訳（例: `cookies: 0 / localStorage: 1 / indexedDB: 1 (firebaseLocalStorageDb)`）。
 
 > **プロファイルをコピーする方式（`save-storage-state.ts`）は SSO では機能しない。** Chrome の Cookie は OS の鍵ストア（macOS Keychain の Chrome Safe Storage）で暗号化されており、別プロセスで開くと復号鍵が違って Cookie 値が壊れ、ログイン画面に戻される。上記の CDP 接続方式が確実（実 Asana で asana.com cookies 79件の有効 state を採取し、認証側テストが pass することを実証済み）。`save-storage-state.ts` は OS 鍵ストアを使わない環境向けの参考に留める。
 

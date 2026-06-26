@@ -18,7 +18,9 @@ import { chromium } from '@playwright/test';
  *        --remote-debugging-port=9222 --remote-allow-origins='*' \
  *        --user-data-dir=/tmp/e2e-cdp-profile &
  * 2) その窓で対象アプリに普通にログインする（webdriver 制御ではないので bot 検知に当たらない）。
- * 3) 実行（VERIFY_HOST は対象のセッションCookieのドメイン。例: asana.com）:
+ * 3) 実行（VERIFY_HOST は対象のセッションが載るドメイン/オリジン。例: asana.com）:
+ *    成功判定は保存場所非依存: cookie / localStorage / IndexedDB のいずれかに痕跡があれば OK。
+ *    Firebase 等トークンを IndexedDB に置くアプリ（indexedDB:true で採取）もこれで拾える。
  *      E2E_CDP_URL="http://localhost:9222" \
  *      E2E_STATE_OUT="e2e/.auth/user.json" \
  *      E2E_VERIFY_HOST="example.com" \
@@ -34,6 +36,14 @@ const CDP = process.env.E2E_CDP_URL ?? 'http://localhost:9222';
 const OUT = process.env.E2E_STATE_OUT ?? 'e2e/.auth/user.json';
 const VERIFY_HOST = process.env.E2E_VERIFY_HOST; // 例: 'asana.com'
 
+// Playwright の storageState() 戻り値型は origins[].indexedDB を公開していない
+// （`indexedDB: true` は採取オプションとしては型にあるが、返り値の型には未反映・1.61 時点）。
+// 実体は indexedDB:true で採取すると origins[] に indexedDB（IndexedDB データベース配列）が入る。
+// 成功判定では DB 名だけ見れば足りるので、最小限の形で読み出すための補助型を置く。
+type IndexedDBDatabaseLike = { name?: string };
+const indexedDbOf = (origin: unknown): IndexedDBDatabaseLike[] =>
+  (origin as { indexedDB?: IndexedDBDatabaseLike[] }).indexedDB ?? [];
+
 (async () => {
   const browser = await chromium.connectOverCDP(CDP);
   const context = browser.contexts()[0];
@@ -42,20 +52,40 @@ const VERIFY_HOST = process.env.E2E_VERIFY_HOST; // 例: 'asana.com'
     process.exit(1);
   }
 
-  const state = await context.storageState();
-  if (VERIFY_HOST) {
-    const hits = state.cookies.filter((c) => c.domain.includes(VERIFY_HOST));
-    if (hits.length === 0) {
-      console.error(`✗ ${VERIFY_HOST} の Cookie が0件。その Chrome で対象にログイン済みか確認してください。`);
+  // 検証用にも IndexedDB を含めて読む（A3: 認証痕跡は cookie/localStorage/IndexedDB のどこにあってもよい）。
+  const state = await context.storageState({ indexedDB: true });
+
+  // VERIFY_HOST に緩く一致（includes）する痕跡を、保存場所別に集計する。
+  //   cookies        : domain が VERIFY_HOST を含む
+  //   localStorage   : origin が VERIFY_HOST を含む origin の localStorage 項目
+  //   indexedDB      : 同 origin の IndexedDB データベース配列（indexedDB:true 採取時のみ存在）
+  const host = VERIFY_HOST;
+  const cookieHits = host ? state.cookies.filter((c) => c.domain.includes(host)) : [];
+  const matchedOrigins = host ? state.origins.filter((o) => o.origin.includes(host)) : [];
+  const lsHits = matchedOrigins.flatMap((o) => o.localStorage ?? []);
+  const idbDbs = matchedOrigins.flatMap((o) => indexedDbOf(o));
+  const idbNames = idbDbs.map((db) => db.name).filter((n): n is string => !!n);
+
+  if (host) {
+    // A3: 3種いずれかが非空なら成功。1件も無ければログイン済みセッション無しとして失敗。
+    const traces = cookieHits.length + lsHits.length + idbDbs.length;
+    if (traces === 0) {
+      console.error(
+        `✗ ${host} のログイン済みセッションが見つかりません（cookie/localStorage/IndexedDB すべて0件）。` +
+          `その Chrome で対象にログイン済みか確認してください。`,
+      );
       await browser.close();
       process.exit(1);
     }
   }
 
-  await context.storageState({ path: OUT });
-  const summary = VERIFY_HOST
-    ? `${VERIFY_HOST} cookies: ${state.cookies.filter((c) => c.domain.includes(VERIFY_HOST)).length} / total: ${state.cookies.length}`
-    : `total cookies: ${state.cookies.length}`;
+  await context.storageState({ path: OUT, indexedDB: true });
+
+  // 保存場所別の内訳サマリ。IndexedDB は DB 名（例: firebaseLocalStorageDb）も併記する。
+  const idbSummary = idbNames.length ? `${idbDbs.length} (${idbNames.join(', ')})` : String(idbDbs.length);
+  const summary = host
+    ? `${host} → cookies: ${cookieHits.length} / localStorage: ${lsHits.length} / indexedDB: ${idbSummary}`
+    : `total → cookies: ${state.cookies.length} / origins: ${state.origins.length}`;
   console.log(`✅ storageState を保存: ${OUT}（${summary}）`);
   await browser.close();
   process.exit(0);

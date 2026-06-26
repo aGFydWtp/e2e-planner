@@ -24,5 +24,6 @@ setup('authenticate as user', async ({ page }) => {
   await expect(page).toHaveURL(/\/dashboard/);
   await expect(page.getByRole('heading', { name: 'ダッシュボード' })).toBeVisible();
 
-  await page.context().storageState({ path: 'e2e/.auth/user.json' });
+  // indexedDB:true で IndexedDB スナップショットも採取（Firebase Auth 等に対応・Playwright 1.51+）。
+  await page.context().storageState({ path: 'e2e/.auth/user.json', indexedDB: true });
 });

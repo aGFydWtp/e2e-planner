@@ -55,7 +55,9 @@ export default defineConfig({
     //    storageState を e2e/.auth/ に保存する。
     //    prebuilt-state（SSO/OTP 等で手動採取した user.json を使う）/ none（認証不要）では
     //    setup を組まない（前者は採取済みの state、後者は state を持たない）。
-    ...(authMode === 'form' ? [{ name: 'setup', testMatch: /auth\.setup\.ts/ }] : []),
+    // testDir は本体テスト用に ./e2e/tests を指すため、setup はここで testDir を ./e2e に上書きする。
+    // （auth.setup.ts は e2e/ 直下に置く想定。上書きしないと testDir 外で setup が発見されず form モードが動かない。）
+    ...(authMode === 'form' ? [{ name: 'setup', testDir: './e2e', testMatch: /auth\.setup\.ts/ }] : []),
 
     // ② 認証済みテスト（user ロール）。
     //    form/prebuilt-state は state を前提に開始し、none は空 state で開始する。
@@ -65,6 +67,9 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         // ログイン済みセッションを焼き付けた state を全テストの開始状態にする。
         // → 各テストでログイン操作を踏まない（ログインフロー検証だけは別扱い、下記参照）。
+        // 採取側が indexedDB:true で保存した state は IndexedDB snapshot を含みうる。
+        // ここで storageState を指定するだけで cookie/localStorage/IndexedDB すべて自動復元される
+        // （Firebase Auth 等の IndexedDB トークンも復元。addInitScript 等の自前注入は不要・Playwright 1.51+）。
         // none モードのみ state を持たない（空の cookies/origins で開始）。
         storageState: authMode === 'none' ? { cookies: [], origins: [] } : 'e2e/.auth/user.json',
       },
