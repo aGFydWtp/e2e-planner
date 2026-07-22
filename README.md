@@ -1,7 +1,7 @@
 # e2e-planner
 
 WebアプリのE2Eテストシナリオを生成する **Claude Code プラグイン**。
-到達範囲の地図化 → シナリオ仕様化 → Playwright コード生成 → 実行・証跡収集の **4段ワークフロー**を、承認ゲート付きで進める。**Playwright 主軸**。
+到達範囲の地図化 → シナリオ仕様化 → Playwright コード生成 → 実行・証跡収集の **4段ワークフロー**を、承認ゲート付きで進める。**Playwright 主軸**。Step1 は ChromeDevTools Recorder の録画JSONを種にする代替手段（`e2e-record`）でも起こせる。
 
 調査レポート（Playwright planner/generator/healer、screen transition / state graph、WebJudge の中間状態評価、Stagehand/Browser Use の観測→行動→検証）を実務ワークフローに落とし込んだもの。
 
@@ -11,7 +11,9 @@ WebアプリのE2Eテストシナリオを生成する **Claude Code プラグ�
 |----------------|------|------|
 | `/e2e-planner:e2e-plan <feature>` | command | オーケストレーター。Step1〜4を承認ゲート付きで進め、末尾で Step5（audit）を自動実行 |
 | `/e2e-planner:e2e-audit` | command | 横断 audit。スイート全体をスキャンして `e2e/index.md` を再生成（単独実行可） |
+| `/e2e-planner:e2e-record <feature> <録画JSON>` | command | 録画起点の**代替 Step1**。ChromeDevTools Recorder の録画JSONから遷移マップ付き plan を生成（`e2e-map` の代わり） |
 | `e2e-map` | skill | Step1 到達範囲の地図化 → 遷移マップ（Markdown） |
+| `e2e-record` | skill | **代替 Step1**（録画起点）。録画JSONを正規化し価値フロー/後始末を人間確認 → e2e-map と同体裁の plan。録画はヒントで正解ではない |
 | `e2e-spec` | skill | Step2 シナリオ仕様化 → Markdown plan（観測点つき・`coverage` メタつき） |
 | `e2e-codegen` | skill | Step3 Playwright `.spec.ts` 生成（Coverage タグ＋横断 `tag` 付与） |
 | `e2e-run` | skill | Step4 実行・trace/video/screenshot 収集・失敗6分類 |
@@ -28,9 +30,11 @@ e2e-planner/
 │   └── marketplace.json        #   マーケットプレイス定義
 ├── commands/
 │   ├── e2e-plan.md             # オーケストレーター command（Step1〜4を承認ゲート付きで進め、末尾で Step5 audit を自動実行）
-│   └── e2e-audit.md            # 横断 audit command（e2e/index.md 再生成・単独実行可）
+│   ├── e2e-audit.md            # 横断 audit command（e2e/index.md 再生成・単独実行可）
+│   └── e2e-record.md           # 録画起点の代替 Step1 command（ChromeDevTools Recorder JSON → 遷移マップ付き plan）
 ├── skills/                     # ワークフローの本体（各 Step = 1 skill）
 │   ├── e2e-map/SKILL.md        #   Step1 到達範囲の地図化
+│   ├── e2e-record/SKILL.md     #   代替 Step1 録画起点（Recorder JSON 正規化 → e2e-map 同体裁 plan）
 │   ├── e2e-spec/SKILL.md       #   Step2 シナリオ仕様化
 │   ├── e2e-codegen/SKILL.md    #   Step3 Playwright spec 生成
 │   ├── e2e-run/SKILL.md        #   Step4 実行・証跡収集・失敗6分類
