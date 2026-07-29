@@ -17,4 +17,4 @@ argument-hint: <feature-name> <録画JSONパス>
 - 成果物: `e2e/plans/<slug>.md`（遷移マップ節＋録画固有3節: 5観点係留メモ / 要修復セレクタ / 未確定オラクルHOW）。詳細は skill 本文に従う。
 - **plan.md を出したら止まる。** ライブ探索・要修復解決・オラクルHOW確定・Playwrightコード生成には進まない（後段の責務）。**コードは書かない。**
 
-> 生成した plan は `/e2e-planner:e2e-plan` の Step2（`e2e-spec`）以降へ手動で引き継げる（録画モードのオーケストレーター自動配線は未実装）。
+> オーケストレーター `/e2e-planner:e2e-plan` に録画JSONパスを渡せば、Step1 が自動で録画起点（本 skill）に切り替わり、Step2 以降へそのまま連続実行される。この単独 command は「plan だけ作って止めたい」ときに使う（生成した plan は Step2（`e2e-spec`）以降へ手動でも引き継げる）。

@@ -1,7 +1,7 @@
 # e2e-planner
 
 WebアプリのE2Eテストシナリオを生成する **Claude Code プラグイン**。
-到達範囲の地図化 → シナリオ仕様化 → Playwright コード生成 → 実行・証跡収集の **4段ワークフロー**を、承認ゲート付きで進める。**Playwright 主軸**。Step1 は ChromeDevTools Recorder の録画JSONを種にする代替手段（`e2e-record`）でも起こせる。
+到達範囲の地図化 → シナリオ仕様化 → Playwright コード生成 → 実行・証跡収集の **4段ワークフロー**を、承認ゲート付きで進める。**Playwright 主軸**。Step1 は探索起点（`e2e-map`・既定）と録画起点（`e2e-record`・ChromeDevTools Recorder の録画JSONを種にする）を**オーケストレーターが入力に応じて自動で切り替える**（録画JSONパスを渡せば録画起点）。
 
 調査レポート（Playwright planner/generator/healer、screen transition / state graph、WebJudge の中間状態評価、Stagehand/Browser Use の観測→行動→検証）を実務ワークフローに落とし込んだもの。
 
@@ -9,9 +9,9 @@ WebアプリのE2Eテストシナリオを生成する **Claude Code プラグ�
 
 | コンポーネント | 種別 | 役割 |
 |----------------|------|------|
-| `/e2e-planner:e2e-plan <feature>` | command | オーケストレーター。Step1〜4を承認ゲート付きで進め、末尾で Step5（audit）を自動実行 |
+| `/e2e-planner:e2e-plan <feature>` | command | オーケストレーター。Step1〜4を承認ゲート付きで進め、末尾で Step5（audit）を自動実行。Step1 は map/record を入力で自動切替（録画JSONパスを渡せば録画起点） |
 | `/e2e-planner:e2e-audit` | command | 横断 audit。スイート全体をスキャンして `e2e/index.md` を再生成（単独実行可） |
-| `/e2e-planner:e2e-record <feature> <録画JSON>` | command | 録画起点の**代替 Step1**。ChromeDevTools Recorder の録画JSONから遷移マップ付き plan を生成（`e2e-map` の代わり） |
+| `/e2e-planner:e2e-record <feature> <録画JSON>` | command | 録画起点の**代替 Step1**（単独実行用・plan だけ作って止める）。ChromeDevTools Recorder の録画JSONから遷移マップ付き plan を生成（`e2e-map` の代わり）。オーケストレーター経由なら自動切替されるのでこの単独 command は不要 |
 | `e2e-map` | skill | Step1 到達範囲の地図化 → 遷移マップ（Markdown） |
 | `e2e-record` | skill | **代替 Step1**（録画起点）。録画JSONを正規化し価値フロー/後始末を人間確認 → e2e-map と同体裁の plan。録画はヒントで正解ではない |
 | `e2e-spec` | skill | Step2 シナリオ仕様化 → Markdown plan（観測点つき・`coverage` メタつき） |
