@@ -11,9 +11,8 @@ WebアプリのE2Eテストシナリオを生成する **Claude Code プラグ�
 |----------------|------|------|
 | `/e2e-planner:e2e-plan <feature>` | command | オーケストレーター。Step1〜4を承認ゲート付きで進め、末尾で Step5（audit）を自動実行。Step1 は map/record を入力で自動切替（録画JSONパスを渡せば録画起点） |
 | `/e2e-planner:e2e-audit` | command | 横断 audit。スイート全体をスキャンして `e2e/index.md` を再生成（単独実行可） |
-| `/e2e-planner:e2e-record <feature> <録画JSON>` | command | 録画起点の**代替 Step1**（単独実行用・plan だけ作って止める）。ChromeDevTools Recorder の録画JSONから遷移マップ付き plan を生成（`e2e-map` の代わり）。オーケストレーター経由なら自動切替されるのでこの単独 command は不要 |
 | `e2e-map` | skill | Step1 到達範囲の地図化 → 遷移マップ（Markdown） |
-| `e2e-record` | skill | **代替 Step1**（録画起点）。録画JSONを正規化し価値フロー/後始末を人間確認 → e2e-map と同体裁の plan。録画はヒントで正解ではない |
+| `e2e-record` | skill | **代替 Step1**（録画起点）。録画JSONを正規化し価値フロー/後始末を人間確認 → e2e-map と同体裁の plan。録画はヒントで正解ではない。単独なら `/e2e-planner:e2e-record <feature> <録画JSON>` で plan だけ作って止められる |
 | `e2e-spec` | skill | Step2 シナリオ仕様化 → Markdown plan（観測点つき・`coverage` メタつき） |
 | `e2e-codegen` | skill | Step3 Playwright `.spec.ts` 生成（Coverage タグ＋横断 `tag` 付与） |
 | `e2e-run` | skill | Step4 実行・trace/video/screenshot 収集・失敗6分類 |
@@ -30,8 +29,7 @@ e2e-planner/
 │   └── marketplace.json        #   マーケットプレイス定義
 ├── commands/
 │   ├── e2e-plan.md             # オーケストレーター command（Step1〜4を承認ゲート付きで進め、末尾で Step5 audit を自動実行）
-│   ├── e2e-audit.md            # 横断 audit command（e2e/index.md 再生成・単独実行可）
-│   └── e2e-record.md           # 録画起点の代替 Step1 command（ChromeDevTools Recorder JSON → 遷移マップ付き plan）
+│   └── e2e-audit.md            # 横断 audit command（e2e/index.md 再生成・単独実行可）
 ├── skills/                     # ワークフローの本体（各 Step = 1 skill）
 │   ├── e2e-map/SKILL.md        #   Step1 到達範囲の地図化
 │   ├── e2e-record/SKILL.md     #   代替 Step1 録画起点（Recorder JSON 正規化 → e2e-map 同体裁 plan）
