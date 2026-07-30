@@ -4,6 +4,8 @@
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:headed": "playwright test --headed",
+    "e2e:happy": "playwright test --grep @class:happy",
+    "e2e:network": "playwright test --grep @class:network",
     "e2e:report": "playwright show-report e2e/.report",
     "e2e:update-snapshots": "playwright test --update-snapshots"
   },

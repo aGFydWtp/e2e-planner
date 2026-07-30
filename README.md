@@ -219,6 +219,7 @@ feature 横断の coverage matrix を**維持台帳に持たず派生で出す**
   - **role**（`storageState` 名に対応する slug）: `guest` / `user` / `admin` など
   - **status**（4値）: `active`（生成対象）/ `excluded`（明示除外）/ `needs_review`（承認前・有効に数えない＝既存「要確認（無人除外）」と同一視）/ `covered_elsewhere`（別 feature で検証済み・新規）
 - **spec タグ（mirror）**: Step3（e2e-codegen）が `[S<n> / map#<m>]`（plan↔spec の S/map 突合・既存）に加え、Playwright ネイティブ `tag: ['@feature:<slug>', '@class:<slug>', '@role:<slug>']`（class/role の横断集計・実行時 `--grep`・新規）を付与する。`annotations` API は使わない（`tag` に一本化）。
+  - タグは実行時フィルタにもそのまま効く: `pnpm e2e -- --grep '@class:happy'`（価値フローだけ）/ `--grep '@class:network'`（ネットワーク観点だけ）/ `--grep '@feature:<slug>'`（機能単位）/ `--grep-invert` で除外。よく使う `e2e:happy` / `e2e:network` は `scaffold/package.snippet.json` に登録済み。
 - **派生 `index.md`**: `e2e-audit`（Step5）が `plans/ tests/ reports/` をスキャンして feature 一覧・class×gap・role×gap・優先 gap 一覧を `e2e/index.md` に**毎回上書き生成**する。e2e-run の Coverage Matrix（1 feature 内）の横断版。テストは再実行しない（reports の feature ごと最新を `last_run`/`last_status` としてパース）。
 
 ## 拡張フック点（本体には組み込まない）
