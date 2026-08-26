@@ -18,9 +18,11 @@ setup('authenticate as user', async ({ page }) => {
   const PASS = process.env.E2E_PASS;
   if (!USER || !PASS) {
     throw new Error(
-      'form 認証モードでは E2E_USER / E2E_PASS が必須です（.env.example 参照）。' +
-        '未ログイン導線のみ検証するなら chromium-guest project を有効化してから --project=chromium-guest、' +
-        'SSO/OTP 環境なら E2E_AUTH_MODE=prebuilt-state を使用してください。'
+      'この setup には E2E_USER / E2E_PASS が必須です（.env.example 参照）。' +
+        'この例の config（ヘッダーコメント参照）は setup を無条件に実行するため、' +
+        '認証をスキップしたい場合は環境変数ではなく config 側の変更が必要です' +
+        '（未ログイン導線専用 project や E2E_AUTH_MODE 切り替えの構成例は ' +
+        'scaffold/playwright.config.ts を参照）。'
     );
   }
 

@@ -44,51 +44,58 @@ const CDP = process.env.E2E_CDP_URL ?? 'http://localhost:9222';
 const OUT = process.env.E2E_STATE_OUT ?? 'e2e/.auth/user.json';
 const VERIFY_HOST_RAW = process.env.E2E_VERIFY_HOST; // 例: 'app.example.com' や 'localhost:3000'
 
-// URL/ホスト文字列から "hostname" または "hostname:port"（port指定時のみ）を取り出す。
-// スキームが無い入力（例: 'app.example.com'）は https:// を仮付与して URL として解釈する。
-// 空白のみ・`//host` のような URL として解釈不能な入力は空文字を返す（呼び出し側で fail-open させない）。
-const normalizeHost = (input: string): string => {
-  const raw = input.trim().toLowerCase();
-  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//.test(raw) ? raw : `https://${raw}`;
-  try {
-    const u = new URL(withScheme);
-    if (!u.hostname) return '';
-    return u.port ? `${u.hostname}:${u.port}` : u.hostname;
-  } catch {
-    return '';
-  }
-};
-
+// URL から "hostname" または "hostname:port"（非標準 port 指定時のみ）を取り出す。
+// :80/:443 は常に落とす: URL はスキーム既定ポートだけを落とすため（http://x:80 → 'x' だが
+// https://x:80 → 'x:80'）、schemeless な VERIFY_HOST に https:// を仮付与する normalizeHost と
+// 実ページ URL とでポートの残り方がズレて永遠に一致しなくなる。両側で常に落として揃える。
+const DEFAULT_PORTS = new Set(['80', '443']);
 const urlHost = (url: string): string | null => {
   try {
     const u = new URL(url);
     if (!u.hostname) return null;
-    return u.port ? `${u.hostname}:${u.port}` : u.hostname;
+    return u.port && !DEFAULT_PORTS.has(u.port) ? `${u.hostname}:${u.port}` : u.hostname;
   } catch {
     return null;
   }
+};
+
+// ホスト文字列（URL でもよい）を urlHost と同じ形へ正規化する。
+// スキームが無い入力（例: 'app.example.com'）は https:// を仮付与して URL として解釈する。
+// 空白のみ等、URL として解釈不能な入力は空文字を返す（呼び出し側で fail-open させない）。
+const normalizeHost = (input: string): string => {
+  const raw = input.trim().toLowerCase();
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//.test(raw) ? raw : `https://${raw}`;
+  return urlHost(withScheme) ?? '';
 };
 
 // host が target 自身か、target のサブドメインであれば一致（ポートを含む文字列同士の比較）。
 const hostMatches = (host: string, target: string): boolean =>
   host === target || host.endsWith(`.${target}`);
 
-// cookieのdomain属性はRFC 6265のドメインマッチ仕様があり、先頭の`.`は
-// 親ドメインcookieとしてサブドメインにも適用される。そのため一致方向は
-// 「targetがdomain自身か、domainのサブドメインである」場合のみに限る
-// （逆方向——domainがtargetのサブドメインである場合——はRFC6265上、そのcookieはtargetには
-//  送出されないため一致させない。以前の実装はこの逆方向条件を誤って含めていた）。
-// domain のラベル数が1（例: 'com' のような広すぎる値）だと誤って広範囲に一致しうるため、
-// 最低2ラベルを要求するガードを入れる。
+// cookie が target（VERIFY_HOST・ポート除去済み）のセッション痕跡かどうかの判定。
+// タブ/origin 判定（hostMatches: target 自身か target のサブドメイン）と同じ範囲をまず認める:
+// target=example.com のとき app.example.com の cookie も痕跡として数える（タブは一致するのに
+// cookie だけ数えない、という食い違いを避ける）。localhost 等の単一ラベルホストも
+// 完全一致（hostMatches）で普通に通る。
+// これに加えて、先頭 `.` 付きの「ドメインcookie」は RFC 6265 上サブドメインにも送出されるため、
+// target が domain のサブドメインである場合も痕跡と認める。host-only cookie（先頭 `.` なし・
+// Playwright の storageState では `.` なしで格納される）は親ドメインからサブドメインへは
+// 送出されないので、この方向では一致させない。
+// ドメインcookie側のラベル数が1（例: '.com' のような広すぎる値）だと誤って広範囲に一致しうる
+// ため、サフィックス一致には最低2ラベルを要求するガードを入れる。
 // 注意: 完全な public suffix list 対応は行っていない（軽量スクリプトのため）。Firebase Hosting
 // 等の共有サフィックス（web.app / firebaseapp.com / vercel.app / github.io 等）配下では、
 // 無関係な別アプリのcookieを誤って「対象の痕跡」として拾うリスクが残る。より安全にするには
 // E2E_VERIFY_HOST をアプリ固有のフルホスト名（例: myapp.web.app ではなく実際に使う正確な
 // ホスト名）で指定すること。
 const cookieDomainMatches = (rawDomain: string, target: string): boolean => {
+  const isDomainCookie = rawDomain.startsWith('.');
   const domain = rawDomain.toLowerCase().replace(/^\./, '');
+  if (!domain) return false;
+  if (hostMatches(domain, target)) return true;
+  if (!isDomainCookie) return false;
   if (domain.split('.').length < 2) return false;
-  return target === domain || target.endsWith(`.${domain}`);
+  return target.endsWith(`.${domain}`);
 };
 
 const VERIFY_HOST = VERIFY_HOST_RAW ? normalizeHost(VERIFY_HOST_RAW) : undefined;
