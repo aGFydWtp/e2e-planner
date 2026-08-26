@@ -25,7 +25,7 @@ WebアプリのE2Eテストシナリオを生成する **Claude Code プラグ�
 ```
 e2e-planner/
 ├── .claude-plugin/             # プラグイン / マーケットプレイス manifest
-│   ├── plugin.json             #   プラグイン定義（name/version/keywords）
+│   ├── plugin.json             #   プラグイン定義（name/keywords）
 │   └── marketplace.json        #   マーケットプレイス定義
 ├── commands/
 │   ├── e2e-plan.md             # オーケストレーター command（Step1〜4を承認ゲート付きで進め、末尾で Step5 audit を自動実行）
