@@ -146,7 +146,9 @@ const indexedDbOf = (origin: unknown): IndexedDBDatabaseLike[] =>
   if (VERIFY_HOST && targets.length === 0) {
     console.error(
       `✗ ${VERIFY_HOST} を開いているタブが debug Chrome に見つかりません。` +
-        `その窓で対象ページを開き、ログイン済みの状態にしてから再実行してください。`,
+        `その窓で対象ページを開き、ログイン済みの状態にしてから再実行してください。` +
+        `対象がポート付きで動くアプリの場合、E2E_VERIFY_HOST はポートまで含めて指定する必要があります` +
+        `（例: 'localhost' では :3000 のタブに一致しません。'localhost:3000' と指定する）。`,
     );
     await browser.close();
     process.exit(1);
