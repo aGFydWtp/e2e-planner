@@ -7,6 +7,8 @@ import { test as setup, expect } from '@playwright/test';
  *
  * 認証情報は環境変数で渡す（.env.example 参照、実値の .env はコミットしない）。
  *   E2E_USER=...  E2E_PASS=...
+ * デフォルト値は持たない（未設定のまま実在しない資格情報でログインを試みて誤検知するのを防ぐため）。
+ * 未設定なら setup 本体の先頭で fail-fast する（下記）。
  *
  * ── ロールを増やすとき ───────────────────────────────────────────
  * 管理者など別ロールが必要なら、もう1つ setup を足して別ファイルに保存する:
@@ -23,11 +25,20 @@ import { test as setup, expect } from '@playwright/test';
  * （setup project を組まず、手動採取した e2e/.auth/user.json をそのまま使う）。
  */
 
-const USER = process.env.E2E_USER ?? 'user@example.com';
-const PASS = process.env.E2E_PASS ?? 'password';
 const STORAGE_STATE = 'e2e/.auth/user.json';
 
 setup('authenticate as user', async ({ page }) => {
+  const USER = process.env.E2E_USER;
+  const PASS = process.env.E2E_PASS;
+  if (!USER || !PASS) {
+    throw new Error(
+      'form 認証モードでは E2E_USER / E2E_PASS が必須です（.env.example 参照）。' +
+        '未ログイン導線のみ検証するなら playwright.config.ts の chromium-guest project を' +
+        '有効化（コメント解除）してから --project=chromium-guest、' +
+        'SSO/OTP 環境なら E2E_AUTH_MODE=prebuilt-state を使用してください。'
+    );
+  }
+
   await page.goto('/login');
   await page.getByLabel('メールアドレス').fill(USER);
   await page.getByLabel('パスワード').fill(PASS);

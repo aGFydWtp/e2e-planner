@@ -22,6 +22,15 @@ const authMode = process.env.E2E_AUTH_MODE ?? 'form';
 export default defineConfig({
   testDir: './e2e/tests',
   outputDir: './e2e/.artifacts',
+  // 注意: `describe.serial`（破壊的シナリオの describe に付与）はあくまで同一ファイル内の競合しか防げない。
+  // 複数の spec ファイルが同一の外部データストア（DB/Firestore 等）を破壊的に共有編集する構成では、
+  // ファイル間・worker 間でも競合が起きうる。その場合のみ、ここを `fullyParallel: false` に変更する。
+  // この問題が実際に効くのは**ローカル実行時**（下の `workers` が `undefined` で CPU 数に応じて
+  // 並列実行される場合）に限られる——CI は下の分岐で既に `workers: 1` なので `fullyParallel` の値に
+  // 関わらずファイル間の並行は起きない。したがって `workers` の CI/ローカル分岐自体（ローカルは並列で
+  // 速く、CI のみ直列にする設計）は変更せず、`fullyParallel: false` だけで足りる。
+  // **この変更は codegen が自動判断で行わない。** 複数 spec ファイルが同一の外部可変状態を共有するか
+  // どうかはプロジェクト固有のアーキテクチャ判断であり、プロジェクト設定者（人間）が明示的に決める。
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
