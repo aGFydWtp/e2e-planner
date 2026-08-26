@@ -4,17 +4,28 @@ import { test as setup, expect } from '@playwright/test';
  * 参考例: 認証セットアップ（setup project）。
  * scaffold/e2e/auth.setup.ts と同じ役割。テスト本体の前に1回走り、
  * ログイン済みの storageState を e2e/.auth/user.json に保存する。
- * 認証情報は env（E2E_USER / E2E_PASS）で渡す。
+ * 認証情報は env（E2E_USER / E2E_PASS）で渡す。デフォルト値は持たない
+ * （未設定のまま実在しない資格情報でログインを試みて誤検知するのを防ぐため）。
+ * 未設定なら setup 本体の先頭で fail-fast する（下記）。
  *
  * playwright.config.ts 側で次の projects 構成を前提にする:
  *   { name: 'setup', testMatch: /.*\.setup\.ts/ }
  *   { name: 'chromium', use: { storageState: 'e2e/.auth/user.json' }, dependencies: ['setup'] }
  */
 
-const USER = process.env.E2E_USER ?? 'user@example.com';
-const PASS = process.env.E2E_PASS ?? 'password';
-
 setup('authenticate as user', async ({ page }) => {
+  const USER = process.env.E2E_USER;
+  const PASS = process.env.E2E_PASS;
+  if (!USER || !PASS) {
+    throw new Error(
+      'この setup には E2E_USER / E2E_PASS が必須です（.env.example 参照）。' +
+        'この例の config（ヘッダーコメント参照）は setup を無条件に実行するため、' +
+        '認証をスキップしたい場合は環境変数ではなく config 側の変更が必要です' +
+        '（未ログイン導線専用 project や E2E_AUTH_MODE 切り替えの構成例は ' +
+        'scaffold/playwright.config.ts を参照）。'
+    );
+  }
+
   await page.goto('/login');
   await page.getByLabel('メールアドレス').fill(USER);
   await page.getByLabel('パスワード').fill(PASS);

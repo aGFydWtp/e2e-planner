@@ -18,7 +18,9 @@ import { chromium } from '@playwright/test';
  *        --remote-debugging-port=9222 --remote-allow-origins='*' \
  *        --user-data-dir=/tmp/e2e-cdp-profile &
  * 2) その窓で対象アプリに普通にログインする（webdriver 制御ではないので bot 検知に当たらない）。
- * 3) 実行（VERIFY_HOST は対象のセッションが載るドメイン/オリジン。例: app.example.com）:
+ * 3) 実行（VERIFY_HOST は対象のセッションが載るホスト名。ポートを使う開発環境では
+ *    `localhost:3000` のようにポートまで含めて指定する（省略すると別ポートの別アプリまで
+ *    一致してしまう）。例: app.example.com）:
  *    成功判定は保存場所非依存: cookie / localStorage / IndexedDB のいずれかに痕跡があれば OK。
  *    Firebase 等トークンを IndexedDB に置くアプリ（indexedDB:true で採取）もこれで拾える。
  *      E2E_CDP_URL="http://localhost:9222" \
@@ -30,11 +32,81 @@ import { chromium } from '@playwright/test';
  * 生成した state と .env は **コミットしない**（scaffold/.gitignore 参照）。
  * 注意: chrome-devtools MCP の Chrome は --remote-debugging-pipe（TCPポート無し）なので接続不可。
  *       上記のとおり専用の debug Chrome を別に立てること。
+ *
+ * VERIFY_HOST の一致判定はホスト名（＋任意でポート）の正規化＋境界付き比較で行う
+ * （`includes` による別ドメイン誤マッチ（例: notexample.com が example.com にヒット）を防ぐ）。
+ * ポートを比較に含めるのは、同一 Chrome で別ポートの別アプリを開いている開発環境で
+ * ポート違いのタブ/originまで誤って一致させないため（cookie の domain 属性にはポートが
+ * 乗らないため cookie 判定だけはポートを無視する。詳細は cookieDomainMatches 参照）。
  */
 
 const CDP = process.env.E2E_CDP_URL ?? 'http://localhost:9222';
 const OUT = process.env.E2E_STATE_OUT ?? 'e2e/.auth/user.json';
-const VERIFY_HOST = process.env.E2E_VERIFY_HOST; // 例: 'app.example.com'
+const VERIFY_HOST_RAW = process.env.E2E_VERIFY_HOST; // 例: 'app.example.com' や 'localhost:3000'
+
+// URL から "hostname" または "hostname:port"（非標準 port 指定時のみ）を取り出す。
+// :80/:443 は常に落とす: URL はスキーム既定ポートだけを落とすため（http://x:80 → 'x' だが
+// https://x:80 → 'x:80'）、schemeless な VERIFY_HOST に https:// を仮付与する normalizeHost と
+// 実ページ URL とでポートの残り方がズレて永遠に一致しなくなる。両側で常に落として揃える。
+const DEFAULT_PORTS = new Set(['80', '443']);
+const urlHost = (url: string): string | null => {
+  try {
+    const u = new URL(url);
+    if (!u.hostname) return null;
+    return u.port && !DEFAULT_PORTS.has(u.port) ? `${u.hostname}:${u.port}` : u.hostname;
+  } catch {
+    return null;
+  }
+};
+
+// ホスト文字列（URL でもよい）を urlHost と同じ形へ正規化する。
+// スキームが無い入力（例: 'app.example.com'）は https:// を仮付与して URL として解釈する。
+// 空白のみ等、URL として解釈不能な入力は空文字を返す（呼び出し側で fail-open させない）。
+const normalizeHost = (input: string): string => {
+  const raw = input.trim().toLowerCase();
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//.test(raw) ? raw : `https://${raw}`;
+  return urlHost(withScheme) ?? '';
+};
+
+// host が target 自身か、target のサブドメインであれば一致（ポートを含む文字列同士の比較）。
+const hostMatches = (host: string, target: string): boolean =>
+  host === target || host.endsWith(`.${target}`);
+
+// cookie が target（VERIFY_HOST・ポート除去済み）のセッション痕跡かどうかの判定。
+// タブ/origin 判定（hostMatches: target 自身か target のサブドメイン）と同じ範囲をまず認める:
+// target=example.com のとき app.example.com の cookie も痕跡として数える（タブは一致するのに
+// cookie だけ数えない、という食い違いを避ける）。localhost 等の単一ラベルホストも
+// 完全一致（hostMatches）で普通に通る。
+// これに加えて、先頭 `.` 付きの「ドメインcookie」は RFC 6265 上サブドメインにも送出されるため、
+// target が domain のサブドメインである場合も痕跡と認める。host-only cookie（先頭 `.` なし・
+// Playwright の storageState では `.` なしで格納される）は親ドメインからサブドメインへは
+// 送出されないので、この方向では一致させない。
+// ドメインcookie側のラベル数が1（例: '.com' のような広すぎる値）だと誤って広範囲に一致しうる
+// ため、サフィックス一致には最低2ラベルを要求するガードを入れる。
+// 注意: 完全な public suffix list 対応は行っていない（軽量スクリプトのため）。Firebase Hosting
+// 等の共有サフィックス（web.app / firebaseapp.com / vercel.app / github.io 等）配下では、
+// 無関係な別アプリのcookieを誤って「対象の痕跡」として拾うリスクが残る。より安全にするには
+// E2E_VERIFY_HOST をアプリ固有のフルホスト名（例: myapp.web.app ではなく実際に使う正確な
+// ホスト名）で指定すること。
+const cookieDomainMatches = (rawDomain: string, target: string): boolean => {
+  const isDomainCookie = rawDomain.startsWith('.');
+  const domain = rawDomain.toLowerCase().replace(/^\./, '');
+  if (!domain) return false;
+  if (hostMatches(domain, target)) return true;
+  if (!isDomainCookie) return false;
+  if (domain.split('.').length < 2) return false;
+  return target.endsWith(`.${domain}`);
+};
+
+const VERIFY_HOST = VERIFY_HOST_RAW ? normalizeHost(VERIFY_HOST_RAW) : undefined;
+if (VERIFY_HOST_RAW && !VERIFY_HOST) {
+  console.error(
+    `✗ E2E_VERIFY_HOST="${VERIFY_HOST_RAW}" を解釈できません。ホスト名（例: app.example.com）か ` +
+      `URL（例: https://app.example.com）、必要ならポート付き（例: localhost:3000）で指定してください。` +
+      `解釈できない値のまま検証をスキップする（fail-open）のを避けるため、ここで終了します。`,
+  );
+  process.exit(1);
+}
 
 // Playwright の storageState() 戻り値型は origins[].indexedDB を公開していない
 // （`indexedDB: true` は採取オプションとしては型にあるが、返り値の型には未反映・1.61 時点）。
@@ -61,7 +133,11 @@ const indexedDbOf = (origin: unknown): IndexedDBDatabaseLike[] =>
   const targets = context
     .pages()
     .filter((p) => isReloadable(p.url()))
-    .filter((p) => (VERIFY_HOST ? p.url().includes(VERIFY_HOST) : true));
+    .filter((p) => {
+      if (!VERIFY_HOST) return true;
+      const host = urlHost(p.url());
+      return host ? hostMatches(host, VERIFY_HOST) : false;
+    });
   for (const p of targets) {
     // Firebase 等はハイドレーション後に IndexedDB を書くため networkidle まで待つ。
     // 遅いページで networkidle がタイムアウトしても採取自体は試せるよう load にフォールバック。
@@ -70,7 +146,9 @@ const indexedDbOf = (origin: unknown): IndexedDBDatabaseLike[] =>
   if (VERIFY_HOST && targets.length === 0) {
     console.error(
       `✗ ${VERIFY_HOST} を開いているタブが debug Chrome に見つかりません。` +
-        `その窓で対象ページを開き、ログイン済みの状態にしてから再実行してください。`,
+        `その窓で対象ページを開き、ログイン済みの状態にしてから再実行してください。` +
+        `対象がポート付きで動くアプリの場合、E2E_VERIFY_HOST はポートまで含めて指定する必要があります` +
+        `（例: 'localhost' では :3000 のタブに一致しません。'localhost:3000' と指定する）。`,
     );
     await browser.close();
     process.exit(1);
@@ -79,13 +157,21 @@ const indexedDbOf = (origin: unknown): IndexedDBDatabaseLike[] =>
   // 検証用にも IndexedDB を含めて読む（A3: 認証痕跡は cookie/localStorage/IndexedDB のどこにあってもよい）。
   const state = await context.storageState({ indexedDB: true });
 
-  // VERIFY_HOST に緩く一致（includes）する痕跡を、保存場所別に集計する。
-  //   cookies        : domain が VERIFY_HOST を含む
-  //   localStorage   : origin が VERIFY_HOST を含む origin の localStorage 項目
+  // VERIFY_HOST に正規化済みホスト名で一致（境界付き比較）する痕跡を、保存場所別に集計する。
+  //   cookies        : domain が VERIFY_HOST とドメインマッチする（RFC 6265・先頭 . の親ドメインcookie考慮）。
+  //                    cookie の domain 属性にはポートが乗らないため、ここだけ VERIFY_HOST からポートを除いて比較する。
+  //   localStorage   : origin の hostname（＋ポート）が VERIFY_HOST と一致 or サブドメインである
   //   indexedDB      : 同 origin の IndexedDB データベース配列（indexedDB:true 採取時のみ存在）
   const host = VERIFY_HOST;
-  const cookieHits = host ? state.cookies.filter((c) => c.domain.includes(host)) : [];
-  const matchedOrigins = host ? state.origins.filter((o) => o.origin.includes(host)) : [];
+  const cookieHits = host
+    ? state.cookies.filter((c) => cookieDomainMatches(c.domain, host.replace(/:\d+$/, '')))
+    : [];
+  const matchedOrigins = host
+    ? state.origins.filter((o) => {
+        const oHost = urlHost(o.origin);
+        return oHost ? hostMatches(oHost, host) : false;
+      })
+    : [];
   const lsHits = matchedOrigins.flatMap((o) => o.localStorage ?? []);
   const idbDbs = matchedOrigins.flatMap((o) => indexedDbOf(o));
   const idbNames = idbDbs.map((db) => db.name).filter((n): n is string => !!n);

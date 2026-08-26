@@ -22,6 +22,21 @@ const authMode = process.env.E2E_AUTH_MODE ?? 'form';
 export default defineConfig({
   testDir: './e2e/tests',
   outputDir: './e2e/.artifacts',
+  // 注意: `describe.serial`（破壊的シナリオの describe に付与）はあくまで同一ファイル内の競合しか防げない。
+  // 複数の spec ファイルが同一の外部データストア（DB/Firestore 等）を破壊的に共有編集する構成では、
+  // ファイル間・worker 間でも競合が起きうる。
+  // その対処として `fullyParallel: false` への変更**だけでは防げない**——`fullyParallel` が止めるのは
+  // 同一ファイル内テストの並列化だけで、別ファイル同士は workers が複数なら並行実行されたまま
+  // （fullyParallel:false でも 2 つの spec ファイルが worker 0/1 で同時実行されることを実測済み）。
+  // ファイル間の競合を止めるには worker 自体を 1 にする: 下の `workers` を常に `1` にする
+  // （CI/ローカル分岐をやめる）か、実行時に `--workers=1` を付ける。CI は既に `workers: 1` なので
+  // この問題が起きるのはローカル実行時のみ。ローカルの並列実行を全面的に手放したくない場合は、
+  // 競合する spec 群だけを別 project に分けたうえで、その project を `--workers=1` 付きの
+  // 別コマンドで実行する（project 分割自体には直列化の効果がない——別 project 同士も複数 worker で
+  // 並行実行される。project 単位の `workers: 1` 指定は Playwright 1.62+ のみで、
+  // package.snippet.json の最低バージョン 1.51 では使えない）。
+  // **この変更は codegen が自動判断で行わない。** 複数 spec ファイルが同一の外部可変状態を共有するか
+  // どうかはプロジェクト固有のアーキテクチャ判断であり、プロジェクト設定者（人間）が明示的に決める。
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
