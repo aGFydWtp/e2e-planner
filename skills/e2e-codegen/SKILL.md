@@ -1,6 +1,6 @@
 ---
 name: e2e-codegen
-description: E2Eワークフロー Step3。承認済みの Markdown plan を Playwright の .spec.ts へ変換し、実画面を探索しながら自律で通るまで収束させる。静的生成→認証確立→収束ループ（chrome-devtools診断+Playwright MCP検証+spec最小修正+実走）の三段。実画面未観測の行は `// @guessed` を付け、実走greenで外す。ロケータは role/text/testid 優先、非同期は web-first assertion、視覚差分は toHaveScreenshot 併用候補をコメント提案。未出現要素を nth/last/first で掴まない。破壊的・自己完結シナリオは UI経路の teardown（認証済み context・末尾に消滅検証）まで生成する。N回試しても通らない残差（残 @guessed）だけ Step4 へ渡す。
+description: E2Eワークフロー Step3。承認済みの Markdown plan を Playwright の .spec.ts へ変換し、実画面を探索しながら自律で通るまで収束させる。静的生成→認証確立→収束ループ（chrome-devtools診断+Playwright MCP検証+spec最小修正+実走）の三段。実画面未観測の行は `// @guessed` を付け、実走greenで外す。ロケータは role/text/testid 優先、非同期は web-first assertion（同期 read＋静的 expect は禁止）、視覚差分は toHaveScreenshot 併用候補をコメント提案。未出現要素を nth/last/first で掴まない。plan の観測点 ID（PRE/O<k>/CP<k>/END）を `test.step('S<n>-CP<k> …')` に mirror し、先頭 step で `[precheck]` を assert、`exec=heavy` は `@heavy` タグへ mirror。破壊的・自己完結シナリオは plan の `data` 経路（ui/api/db）に従った teardown（認証済み context・末尾に消滅検証）まで生成する。N回試しても通らない残差（残 @guessed）だけ Step4 へ渡す。
 when_to_use: e2e-spec の plan が承認された後、Playwright テストコードを生成し実画面探索で通るまで収束させるとき。e2e-plan オーケストレーターの Step3 として。
 argument-hint: <feature-name>
 ---
@@ -52,10 +52,11 @@ E2E_PASS=        # 同上
    ```
    `scaffold/playwright.config.ts` の `projects` は既に **setup project ＋ `dependencies:['setup']` ＋ `storageState`** 構成になっている。
 2. **認証情報は env で渡す** — `E2E_USER` / `E2E_PASS`。`.env` と `e2e/.auth/` は**コミットしない**（scaffold の `.gitignore` 参照）。
-3. **各テストは state を前提に開始する** — `playwright.config.ts` の project に `storageState: 'e2e/.auth/user.json'` が入っているので、テストは `page.goto('/dashboard')` から直接書ける。`test.use({ storageState })` を個別指定しない限り project の設定が効く。
+3. **各テストは state を前提に開始する** — `playwright.config.ts` の project に `storageState: STORAGE_STATE`（`process.env.E2E_STORAGE_STATE ?? 'e2e/.auth/user.json'`）が入っているので、テストは `page.goto('/dashboard')` から直接書ける。`test.use({ storageState })` を個別指定しない限り project の設定が効く。**spec 側で state のパスを直書きしない**（CI は `E2E_STORAGE_STATE` で別パスに展開する）。
 4. **複数ロール（permission差分）** — `auth.setup.ts` に role ごとの setup を足して `e2e/.auth/<role>.json` を保存し、config に role 別 project を足す（雛形にコメントあり）。
 5. **未ログイン検証**（ログイン画面・検証エラー・権限なしリダイレクト）は **state を持たない project** で実行する。ファイル名を `*.guest.spec.ts` 等にして project の `testMatch` で振り分ける（config にコメント例あり）。
 6. **SSO / OTP / 2FA で form 自動化できない場合** — `auth.setup.ts` の自動ログインは使えない（SSO は自動化ブラウザのログインを bot 検知で弾く）。方針は **`E2E_AUTH_MODE=prebuilt-state`**：新規ログインせず、既にログイン済みの実ブラウザのセッションを `connectOverCDP` で取り出す（同梱 `save-state-cdp.ts`）。**この分岐は Step1（e2e-map）で確定済み。** ここ（静的生成）では `scripts/`（`save-state-cdp.ts`）と `tsx` を配置するところまでをヘッドレスで済ませ、**実 Chrome の起動・ログイン・採取の具体手順は後段の「収束ループ入口（認証確立）」が案内する**（Chrome 起動と採取はエージェントが行い、ユーザーに頼むのはログインだけ）。ここでコピペ用の起動コマンドは出さない（人間タスクは収束ループ入口が所有）。API ログインが可能ならそちら（`request.post` でトークン取得→state 注入）でもよい。
+7. **worker 別アカウント（`E2E_USER_POOL`・form モード専用）** — plan の「前提データ / 環境」で「同一アカウント同時操作で壊れる状態」が `なし` 以外で、かつプロジェクトが同一ロールのアカウントを複数用意できる（`E2E_USER_POOL`）なら、spec の import を `import { test, expect } from '../fixtures/test'`（scaffold の `e2e/fixtures/test.ts`）に切り替える。worker ごとに別アカウントの state が当たり、`serial` に頼らず並列で回せる。**feature fixture（`e2e/fixtures/<feature>.fixture.ts`）を併用するときは `@playwright/test` ではなく `../fixtures/test` の `test` から `extend` する**（別々に extend すると片方が効かない）。プール未設定なら import を切り替えても挙動は変わらない（project の state にフォールバック）。`prebuilt-state`（SSO）では使えない——ロール別に採取した state を project で分ける。
    > **プロファイルをコピーする方式（`save-storage-state.ts`）は SSO では機能しない。** Chrome の Cookie は OS の鍵ストア（macOS Keychain の Chrome Safe Storage）で暗号化されており、別プロセスで開くと復号鍵が違って Cookie 値が壊れ、ログイン画面に戻される。**CDP 接続方式（生きたブラウザの復号済みセッションを取得）が正解**。`save-storage-state.ts` は OS 鍵ストアを使わない環境向けの参考に留める。
 
 ## 変換方針（固定）
@@ -67,9 +68,15 @@ E2E_PASS=        # 同上
   - **作成 UI で出る空行のフォーカスへ `page.keyboard.type(...)` で直接入力**（要素を取り直さない）、または
   - **件数の増加を待ってから新規行を特定**: 操作前に件数を控え、`await expect(rows).toHaveCount(before + 1)` で増加を待ってから `rows.nth(before)` を対象にする。この件数ガードは安全な取得であると同時に、`.last()` が既存行を改名した場合は件数が増えないため `toHaveCount` が落ちて**偽陽性（green なのに破壊）を検出する**役目も果たす。
 - **待機**: web-first assertion（`await expect(locator).toBeVisible()` など）で待つ。`waitForTimeout` の固定待機は使わない。**重い SPA では `page.goto()` / `page.reload()` の既定 `load` 待ちが長く test timeout に当たりやすい** ので、`{ waitUntil: 'domcontentloaded' }` を指定して描画後の web-first assertion で待つ（読み込み完了の判定は assertion 側に寄せる）。
+- **同期 read（`count()` / `innerText()` / `isEnabled()` / `isVisible()` / `textContent()`）を静的 `expect(...)` に渡さない**: `expect(await rows.count()).toBe(3)` / `expect(await btn.isEnabled()).toBe(true)` の形は、読んだ瞬間の値を1回だけ評価するので auto-wait が効かず、描画途中の値で落ちる（または未ロードの 0 で自明に通る）。**web-first matcher に置換する**——`await expect(rows).toHaveCount(3)` / `toContainText()` / `toBeEnabled()` / `toHaveText()`。同期 read を使ってよいのは **assert ではなく分岐だけ**（例: バナーが存在すれば閉じる／teardown で対象行が残っていれば消す）で、**その直前に必ずロード完了ゲート（ロード完了と 1:1 対応するシグナルの web-first assert）を置く**。ゲート無しの分岐は未ロードの 0/false を拾って「存在しない」と誤判定する（下記 teardown の `if (await row.count())` はこの境界の実例。ゲート後の `count()` は分岐、ゲート後の `toHaveCount(0)` は assert、と役割を分ける）。
+- **「操作後も同じ表示」を検証するときは、再取得完了を先に確定する**: ソート・フィルタ・SPA 内の再取得（更新ボタン）・`戻る`・途中離脱後の再訪のように、**操作後の表示が操作前と一致しうる**場面では、web-first matcher が**古い表示に対して即成立**して再取得前の状態を読む（reload/back/abandon 観点で頻出する stale-state レース）。次のいずれかで「再取得が済んだ」を先に確定してから内容を assert する:
+  - plan の遷移マップ「非同期イベント」列にあるエンドポイントに対し、**操作の前に** `const done = page.waitForResponse(r => r.url().includes('<path>') && r.request().method() === 'GET')` を作り、操作後に `await done` する（操作後に作ると取りこぼす）。
+  - または、**操作で必ず変わる要素を先に assert する**——`aria-sort` の値、URL クエリ（`toHaveURL(/sort=/)`）、`aria-busy` / progressbar の**出現→消滅**。
+  - `page.reload()` / `page.goto()` はナビゲーション完了を待つので対象外。**SPA 内の更新ボタン・ソートヘッダ・フィルタ適用は対象**。
+- **silent success（toast も遷移も無い操作）は busy シグナルの「出現→消滅」を2段で待つ**: `getByRole('progressbar')` / `[aria-busy="true"]` / 送信ボタンの `toBeDisabled()` を**まず出現で positive assert し、次に消滅（`toBeHidden()` / `toBeEnabled()`）を待つ**。**消滅単独は否定アサートなので不可**（処理が始まっていなくても通る）。busy が一瞬で出現を取りこぼす場合は、2段待ちに固執せず「**完了後にだけ変わる要素**」（undo・履歴・dirty 表示の解除・一覧への反映）へ待機条件を切り替える（下記「自動保存 UI」参照）。
 - **遷移を伴うクリックの直後は、遷移先ロケータを触る前に遷移自体を assert する**: URL 変化や SPA 画面切替を起こすクリック（`getByRole('button', { name: '次へ進む' }).click()` 等）の **次の行で、遷移先にだけ存在する要素を触る前に** `await expect(page).toHaveURL(/遷移先/)` か遷移先固有要素の `await expect(...).toBeVisible()` を**1行置く**。`click()` は「クリックした」だけで遷移完了を待たないため、これを省くと**まだ遷移前のページ上で次の要素を探し始め**、その要素が遷移前ページに無いと `element(s) not found` で落ちる（実検証で「送信系ボタンのクリック直後に遷移先だけにある要素を探し、遷移前ページのまま落ちた」失敗5件の直接原因）。**判断に迷うなら置く**（過剰でも害は小さい）。**`waitForLoadState('networkidle')` は使わない**——Playwright 非推奨で、SPA ではネットワークが永久に idle にならない／逆に描画前に idle になり flaky。遷移の確証は「遷移先の URL/要素」を web-first で assert することで取る。
 - **best-effort な `.click().catch(() => {})` で握りつぶさない（hook 全滅の原因）**: バナー閉じ等を `getByRole(...).click().catch(() => {})` のように書いても **`.catch()` は hang を救わない**。要素が actionability（可視・有効・非オーバーレイ）を満たさないと `click` は test timeout（既定30s）までブロックし、`.catch()` が効く前に `beforeEach`/`afterEach` ごとタイムアウトさせて全テストを巻き込む（実検証で6件全滅の直接原因）。代替:
-  - **`count()` / `isVisible()` で存在・可視を確認してからのみ操作する**（不在ならスキップ）、
+  - **`count()` / `isVisible()` で存在・可視を確認してからのみ操作する**（不在ならスキップ。これは同期 read の「分岐」用途であり assert ではない——直前にロード完了ゲートを置く）、
   - どうしても best-effort にするなら **`{ timeout: 1500 }` 等の短い timeout を明示**して hang を防ぐ、
   - **そもそも検証に干渉しない要素は無理に閉じない**（閉じる必要があるか自体を判断する）。
 - **`page.goto()` は「入口」専用。価値フロー途中の画面遷移は UI を辿る**: `goto()` を使ってよいのは (a) シナリオの **開始状態**（`開始状態` の入口 URL／storageState 前提で直接開く）と (b) teardown の**新規 context 起点**だけ。**シナリオの `操作` 列に現れる画面遷移（例: エディタ→設定に戻る）は、対応する UI（リンク・ボタン・ヘッダー/グローバルナビ）を実際に click して辿る**。ここを `goto(設定URL)` で直行すると**ユーザー動線（その遷移導線自体の検証）を飛ばす**ため、価値フローの一部である遷移は UI 経由で踏む。遷移後は上記「遷移を伴うクリックの直後」ルールで遷移先を assert する。
@@ -84,12 +91,18 @@ E2E_PASS=        # 同上
 
 ## 破壊的・自己完結シナリオのコード化
 
-Step2（e2e-spec）で「自己完結」と確定したシナリオは、**setup → 検証 → teardown を1本のテストとして純 E2E（UI経由）で生成**する。**ここでの方針判断は Step2 が済ませている。codegen は確定済み方針に従うだけで、勝手な判断をしない。**
+Step2（e2e-spec）で「自己完結」と確定したシナリオは、**setup → 検証 → teardown を1本のテストとして生成**する（**検証本体は UI 経由の純 E2E**。setup / teardown の経路は下記のとおり plan の `data` フィールドに従い、`ui` に限らない）。**ここでの方針判断は Step2 が済ませている。codegen は確定済み方針に従うだけで、勝手な判断をしない。**
 
-- **破壊的・自己完結シナリオの describe には `test.describe.configure({ mode: 'serial' })` を付ける。** `playwright.config.ts` は `fullyParallel: true` のため、同一データ空間に作用する作成/更新/削除テストを並列実行すると、別テストが作った/消した行と競合して flaky になる。serial で同 describe 内を直列化し、競合を避ける。**これは応急処置である。** 本来は各テストが**自分専用の隔離データ**（テストごとにユニークなアカウント/プロジェクト/seed）を setup で用意し teardown で消すことで、並列のまま安全にするのが筋。隔離が用意できない段階での暫定手段が serial だと理解しておく。
-  - **`describe.serial` は同一ファイル内の競合しか防げない。** 複数のfeatureファイルが同一の外部データストア（DB/Firestore等）を共有して破壊的に編集する構成では、ファイル間・worker間の競合も起きる。この競合は `fullyParallel: false` への変更**では防げない**——`fullyParallel` が止めるのは同一ファイル内テストの並列化だけで、別ファイル同士は workers が複数なら並行実行されたまま（fullyParallel:false でも2つのspecファイルが別workerで同時実行されることを実測済み）。ファイル間の競合を止めるにはworker自体を1にする: `playwright.config.ts` の `workers` を常に `1` にする（CI/ローカル分岐をやめる）か、実行時に `--workers=1` を付ける。CIは既存の `workers: process.env.CI ? 1 : undefined` 分岐で既に1 workerのため、この問題が起きるのは**ローカル実行時のみ**。ローカルの並列実行を全面的に手放したくない場合は、競合するspec群だけを別projectに分けたうえで、そのprojectを `--workers=1` 付きの別コマンドで実行する——project分割自体には直列化の効果がない（別project同士も複数workerで並行実行される。project単位の `workers: 1` 指定はPlaywright 1.62+のみで、scaffoldの最低バージョン1.51では使えない）。（隔離されたデータで書けるなら並列のままでよい。scaffoldの既定は隔離データを想定している）。**この変更はcodegenが自動判断で行わない**——複数specファイルが同一の外部可変状態を共有するかはプロジェクト固有のアーキテクチャ判断であり、プロジェクト設定者（人間）が明示的に決める。
+- **破壊的・自己完結シナリオの describe には `test.describe.configure({ mode: 'serial' })` を付ける。** `playwright.config.ts` は `fullyParallel: true` のため、同一データ空間に作用する作成/更新/削除テストを並列実行すると、別テストが作った/消した行と競合して flaky になる。serial で同 describe 内を直列化し、競合を避ける。**これは応急処置である。** 本来は各テストが**自分専用の隔離データ**（テストごとにユニークなアカウント/プロジェクト/seed）を setup で用意し teardown で消すことで、並列のまま安全にするのが筋。隔離が用意できない段階での暫定手段が serial だと理解しておく。**plan の `data` が `own=self` かつ `setup` が `api` または `db`（＝各テストが実行IDで専有する隔離データを非 UI で用意し、一覧 UI 上でも完全一致で特定できる）なら serial を付けず並列のままにする**——隔離データが本筋であり、serial はその代替なので両方は要らない。**判定は `own` と `setup` だけで閉じる**（`teardown` の経路は見ない。Step3 が判断を足さないため）。`setup=ui`（一覧 UI を共有して作成する）や `own=shared` への書き込みは従来どおり serial。
+  - **`describe.serial` は同一ファイル内の競合しか防げない。** 複数のfeatureファイルが同一の外部データストア（DB/Firestore等）を共有して破壊的に編集する構成では、ファイル間・worker間の競合も起きる。この競合は `fullyParallel: false` への変更**では防げない**——`fullyParallel` が止めるのは同一ファイル内テストの並列化だけで、別ファイル同士は workers が複数なら並行実行されたまま（fullyParallel:false でも2つのspecファイルが別workerで同時実行されることを実測済み）。ファイル間の競合を止めるにはworker自体を1にする: `playwright.config.ts` の `workers` を常に `1` にする（CI/ローカル分岐をやめる）か、実行時に `--workers=1` を付ける。CIは scaffold の `workers` 既定（CI では 1・`E2E_WORKERS` で明示上書きしない限り）で既に1 workerのため、この問題が起きるのは**ローカル実行時のみ**。ローカルの並列実行を全面的に手放したくない場合は、競合するspec群だけを別projectに分けたうえで、そのprojectを `--workers=1` 付きの別コマンドで実行する——project分割自体には直列化の効果がない（別project同士も複数workerで並行実行される。project単位の `workers: 1` 指定はPlaywright 1.52 以降で使え、scaffoldの最低バージョン1.51では使えない）。（隔離されたデータで書けるなら並列のままでよい。scaffoldの既定は隔離データを想定している）。**この変更はcodegenが自動判断で行わない**——複数specファイルが同一の外部可変状態を共有するかはプロジェクト固有のアーキテクチャ判断であり、プロジェクト設定者（人間）が明示的に決める。
 - **勝手に `test.skip` ガードで黙らせない。** 破壊的だからといって codegen の判断でテストを眠らせるのは禁止。除外は Step2 でユーザーが決めたものだけ（除外シナリオはそもそも生成しない）。skip で「書いたが動かない」テストを残さない。
-- **setup / teardown は UI 経由（純 E2E）で書く。** 作成も削除も**実際のユーザー操作経路**で踏む。`afterEach` / `afterAll` で、**作成したのと同じ UI 経路**で削除する（削除 UI を踏むこと自体が価値フローの検証になる）。DB 直叩きや API ショートカットで後始末しない（純 E2E のため）。
+- **setup / teardown の経路は plan の `data` フィールド（`setup=` / `teardown=`）に従う。codegen は経路を勝手に選ばない。** 経路は Step2 の承認ゲート①で HITL 確定済み（作成/削除の UI 自体が検証対象なら `ui`、検証対象でない前提データは `api`/`db` を人が選ぶ）。経路ごとの書き方:
+  - **`ui`**（既定・作成/削除 UI 自体が価値フローの検証対象）— 作成も削除も**実際のユーザー操作経路**で踏む。`afterEach` / `afterAll` で、**作成したのと同じ UI 経路**で削除する（削除 UI を踏むこと自体が価値フローの検証になる）。この場合は DB 直叩きや API ショートカットで後始末しない。
+  - **`api`** — Playwright の `request` fixture（`baseURL` と project の `storageState` の cookie をそのまま流用する。ヘッダトークン方式なら `extraHTTPHeaders` を project の `use` に置く）で seed/teardown を書き、**`e2e/fixtures/<feature>.fixture.ts`** に `test.extend` の fixture として置く（例: `seededTask` fixture が `use()` の前に POST で作り、後に DELETE で消す）。spec 本文には UI 操作と検証だけが残る。**消滅検証は API 経路でも必須**（DELETE 後に GET が 404 / 一覧に無いことを assert）。**本文の UI 削除が検証対象（`END` で消滅を検証する）シナリオでも、Step2 は失敗時の回収経路として `teardown=api` を書く**——fixture の DELETE は本文が既に消していれば 404 を返すので、**404 を許容する冪等な形**にする（下記 fixture 例）。
+  - **`db`** — **プロジェクト側が提供する seed/cleanup スクリプト**（plan の Step1「投入手段」に書かれたもの）を fixture から起動する（`child_process.execFileSync` 等）。**プラグインは DB 実装を持たない**——接続コードやスキーマを codegen が書き起こさない。スクリプトが無ければ (c) 途中離脱で seed・env へ差し戻す。
+  - **`seed`** — 固定シードを読むだけ。作成も削除もしない（`teardown=none`）。
+  - **plan に `data` 行が無い旧書式の plan** は `setup=ui / own=self / teardown=ui` 扱いで生成し、**「plan に `data` 行が無いため ui/self として生成した」と完了報告に明記する**（plan への追記は「事実の確定」ではなく Step2 の判断なので、書き戻しは提案に留める）。
+  - **`api`/`db` 経路でも「UI で消えたこと」の検証を省かない。** 経路が非 UI なのは後始末の手段であって、検証対象のシナリオが UI で「作成物が見える／消えた」を確認する部分は plan の観測点どおり残す。
 - **「消えたこと」の検証は必須。ただし検証を"ロード完了ゲートの後段"に置かないと、それ自体が自明に通る。** 後始末の最後に「作成名がもう存在しない」ことを検証する一文を必ず置く（無いと、teardown が実機で発火していなくても green のまま残骸が蓄積する。実検証で削除メニューが実 DOM で発火せず残骸が溜まった）。**だがこの対策 assert には二段目の穴がある**——一覧が非同期ロードなら、`if (await row.count())` ガードは未ロードの 0 を拾って**削除をスキップ**し、直後の `toHaveCount(0)` も**同じ未ロード状態で 0 を返して素通り**する。teardown が完全な no-op でも green になる（実検証で並列実行時に発生し、全 green のまま残骸が出た）。したがって:
   - **消滅検証は「対象コレクションのロード完了」を確定させた後段に置く。** ロード完了の確定は固定待機でも `networkidle` でもなく、**ロード完了と 1:1 対応するシグナルの出現**で取る（例: 「データが空でない状態でだけ描画される要素」の `toBeAttached`）。
   - **teardown では「対象行の出現待ち」をロード完了の代用にできない**（テスト本文が既に消している可能性があるため）。**行以外のロード完了シグナルが要る**。本体の入口ヘルパーは「操作可能になるまで」しか待たないことが多いので、**teardown 用の入口を分ける**か、流用してよいか必ず確認する。
@@ -97,53 +110,104 @@ Step2（e2e-spec）で「自己完結」と確定したシナリオは、**setup
   - ロード完了ゲートが入れば「削除が失敗すれば検証 assert が落ちる」ので、**削除クリックの失敗を `try/catch` で握るかは任意**（握るなら消滅検証は `catch` の外に置き、必ず評価されるようにする）。**迷うなら握らずに落とす**——Playwright は本文と teardown の失敗を両方報告するので「teardown 失敗が本検証を隠す」害は小さく、「効いていないのに green」の害の方が大きい。`context.close()` は `finally` に置く。
 - **削除等の確定操作に確認ダイアログがあるなら、確定クリックの前にダイアログ本文へ対象名が含まれることを assert する。** 位置依存やロケータの取り違えで**別のデータを消す事故**を検出できる（teardown 側でも同様に置く）。複製・派生を伴うシナリオでは、**削除後に原本が残存していること**も終了条件に含める。
 - **「画面が操作可能」と「書き込み先スコープの確定」は別物。** URL クエリやセッションでテナント・組織・対象プロジェクトが決まるアプリで、そのスコープ反映が非同期だと、**確定前の書き込みが別スコープに入り、UI からは消せない残骸になる**（実検証で発生）。書き込みを含むテストの開始ゲートには、描画完了だけでなく**スコープ確定を示す観測点の assert** を含める。plan にその観測点が無ければ実画面探索で確定し、plan に書き戻す。
-- **teardown のコンテキストは認証済みにする。** 認証必須アプリで `browser.newPage()` を使うと storageState を持たずログイン画面に飛び、削除も上記の検証アサートも常に失敗する。後始末は **`browser.newContext({ storageState: 'e2e/.auth/user.json' })` から開く**。
+- **teardown のコンテキストは認証済みにする。storageState のパスは直書きしない。** 認証必須アプリで `browser.newPage()` を使うと storageState を持たずログイン画面に飛び、削除も上記の検証アサートも常に失敗する。後始末は **`browser.newContext({ storageState: test.info().project.use.storageState })` から開く**（実行中 project の state をそのまま引き継ぐ。`afterAll` でも `test.info()` は使える）。spec / pages / fixtures では**常に `test.info().project.use.storageState` を使う**（`process.env.E2E_STORAGE_STATE` の参照は config / `auth.setup.ts` / `fixtures/test.ts` に閉じ、生成物には書かない）。**`'e2e/.auth/user.json'` 等のパス直書きは禁止**——admin project のテストが user の state で消しに行って権限差で失敗する／別ロールのデータを消す事故、CI が `E2E_STORAGE_STATE` で展開した state を拾えない事故の両方を防ぐ。
+- **retry 前提で書かない。** scaffold の既定は CI でも `retries: 0`（`E2E_RETRIES` で明示的に上げない限り再試行しない）。破壊的テストは非冪等なので、retry されると別 worker で spec が再ロードされ `RUN_ID` が変わり、**初回試行分が runId 違いの残骸になる**。「たまに落ちるが retry で通る」を許容せず、落ちる原因を収束ループで潰す（flaky の再評価は Step4 が無修正3回で行う）。
+- **並列前提で書く。** 各 test は**他 test の作成物・実行順序に依存しない**（`fullyParallel: true` で同一ファイル内も別 worker に散る）。describe 内で共有してよいのは **`RUN_ID` と名前定数だけ**——`let created` のような可変状態を test 間で受け渡さない。「S3 は S2 が作った行を使う」形は plan の段階で自己完結に直す（`data.own=self`）。
 - **teardown が実機で確立するまで破壊的シナリオを本番で回さない。** 上記の検証アサートで teardown 発火を確認できるまでは、破壊的・自己完結シナリオは**捨てプロジェクト/捨て環境で回す**（本番類似へ向けない）。teardown 未確立のまま本番で回すと、green でも実データを汚す。
 - **作成データ名は「人間が消してよいと判断できる可視プレフィックス＋実行ID」にする**（例: `[E2E削除可] <feature>-<用途>-<runId>`。`runId` は spec ロード時の `Date.now()` 等）。timestamp だけのユニーク名では、残骸を見つけた人間が**消してよいか判断できない**（実運用でこの規約により、本番類似環境に出た残骸を安全に回収できた）。加えて、共通 `afterEach` 等の一括掃除は**プレフィックス全体ではなく当該 `runId` にスコープする**——プレフィックス一括で消すと、**並列ワーカーが作成中のデータを巻き込む**。
 - **テストが既存の外部データに依存する場合は、依存を隠さない。** 「テストが新規作成するデータ」の命名規則（上記）とは別に、「テストが既存の外部データ（実在ユーザーのアカウント、事前に用意された特定IDのfixture等）に依存する」パターンがある。この場合、可能なら環境変数化する（例: `E2E_SHARE_TARGET_EMAIL=<共有先として使う既存アカウントのメールアドレス>`）。plan判断で環境変数化が過剰と判断された場合でも、依存箇所のコードに、別環境で実行する際に何が起きうるか（データ不在で失敗する／他ユーザーのデータが変更される等）を示すWARNINGコメントを必ず添える。これにより、同一環境での継続運用は許容しつつ、移植時のリスクを不可視化しない。
 
 ```ts
+// e2e/pages/tasks.page.ts — 2テスト以上（本文と teardown）で使うロケータ・ゲート・teardown 入口は pages へ
+import { expect, type Page } from '@playwright/test';
+
+export class TasksPage {
+  constructor(readonly page: Page) {}
+  // 一覧のロード完了と 1:1 対応するシグナル。データ取得前は skeleton/spinner（progressbar）で、
+  // 取得完了時にだけ list role の <ul> が描画される、という関係を実画面で確認してから使う。
+  // role ベースで取れない一覧なら CSS でもよいが、その理由をここにコメントで残す（自己点検「CSS を残すなら理由」）。
+  readonly list = this.page.getByRole('list', { name: 'タスク一覧' });
+  // 行の完全一致特定（hasText は部分一致なので派生名を拾う）
+  rowByName(title: string) {
+    return this.page.getByRole('listitem').filter({ has: this.page.getByRole('link', { name: title, exact: true }) });
+  }
+  async open() {                       // 本文の入口: 操作可能になるまで
+    await this.page.goto('/tasks', { waitUntil: 'domcontentloaded' });
+    await expect(this.page.getByRole('button', { name: '新規' })).toBeEnabled();
+  }
+  async waitLoaded() {                 // ロード完了ゲート: 行の出現待ちを代用にしない（teardown で対象が既に無い可能性）
+    await expect(this.list).toBeAttached();
+  }
+  async openForTeardown() {            // teardown 入口は本文の入口と分ける（「操作可能」≠「ロード完了」）
+    await this.page.goto('/tasks', { waitUntil: 'domcontentloaded' });
+    await this.waitLoaded();
+  }
+}
+```
+
+```ts
+// e2e/tests/tasks.spec.ts
 // S4. タスク作成→完了（破壊的・自己完結） plan で「自己完結」確定済み
+// plan: data: setup=ui / own=self / teardown=ui（ui 経路＝作成/削除 UI 自体が検証対象）、exec=light
+import { test, expect } from '@playwright/test';
+import { TasksPage } from '../pages/tasks.page';
+
 test.describe('task lifecycle', () => {
-  test.describe.configure({ mode: 'serial' });  // 破壊的シナリオは直列化（fullyParallel 下での競合回避・応急処置）
-  const RUN_ID = Date.now();
+  // ui 経路で一覧 UI を共有するため直列化（fullyParallel 下での競合回避・応急処置）。
+  // data.own=self かつ api/db 経路（隔離データ）なら serial は付けない。
+  test.describe.configure({ mode: 'serial' });
+  const RUN_ID = Date.now();                    // describe 内で test 間に共有してよいのは RUN_ID と名前定数だけ
   const name = `[E2E削除可] task-${RUN_ID}`;   // 可視プレフィックス＋runId（人間が消してよいと判断できる）
 
-  // 一覧のロード完了と 1:1 対応するシグナル。データ取得前は skeleton/spinner で、
-  // 取得完了時にだけこの <ul> が描画される、という関係を実画面で確認してから使う。
-  const taskList = (page) => page.locator('ul.task-list');
-  // 行の完全一致特定（hasText は部分一致なので派生名を拾う）
-  const rowByName = (page, title) =>
-    page.getByRole('listitem').filter({ has: page.getByRole('link', { name: title, exact: true }) });
-
   test('creates, completes, then deletes a task via UI [S4 / map#4]', { tag: ['@feature:tasks', '@class:happy', '@role:user'] }, async ({ page }) => {
-    await page.goto('/tasks');
-    await page.getByRole('button', { name: '新規' }).click();
-    await page.getByLabel('タイトル').fill(name);
-    await page.getByRole('button', { name: '保存' }).click();
-    await expect(rowByName(page, name)).toBeVisible();       // 作成の検証
-    // …完了操作と検証…
+    const tasks = new TasksPage(page);
+
+    await test.step('S4-PRE ログイン済みで一覧が操作可能・書き込みスコープ確定', async () => {
+      await tasks.open();
+      // precheck: 失敗メッセージに [precheck] を含める（Step4 が「前提データ不整合」へ機械分類する）
+      await expect(page.getByRole('navigation', { name: 'ユーザーメニュー' }), '[precheck] ログイン済みランドマークが無い（state 失効?）').toBeVisible();
+      await expect(page.getByRole('heading', { name: /プロジェクト:/ }), '[precheck] 書き込み先プロジェクトが未確定').toBeVisible();
+    });
+
+    await test.step('S4-O1 新規作成ダイアログでタイトルを入力し保存', async () => {
+      await page.getByRole('button', { name: '新規' }).click();
+      await page.getByLabel('タイトル').fill(name);
+      await page.getByRole('button', { name: '保存' }).click();
+    });
+
+    await test.step('S4-CP1 一覧に作成行が1件だけ現れる', async () => {
+      await expect(tasks.rowByName(name)).toHaveCount(1);   // 完全一致で1件（総件数は数えない）
+    });
+
+    // …S4-O2 完了操作 / S4-CP2 完了状態の検証…
+
+    await test.step('S4-END 削除後に作成行が無い（ロード完了ゲートの後段で評価）', async () => {
+      await tasks.rowByName(name).getByRole('button', { name: '削除' }).click();
+      await expect(page.getByRole('dialog')).toContainText(name);           // 対象名で取り違え検出
+      await page.getByRole('button', { name: '確認' }).click();
+      await tasks.waitLoaded();
+      await expect(tasks.rowByName(name)).toHaveCount(0);
+    });
   });
 
-  // teardown も UI 経路で。「消えたこと」の検証は必須だが、
+  // teardown も plan の data.teardown（ここでは ui）経路で。「消えたこと」の検証は必須だが、
   // 一覧のロード完了を確定させた後段で評価しないと、未ロードのまま 0 件で自明に通る。
   test.afterAll(async ({ browser }) => {
     // newPage だと storageState を持たずログイン画面に飛ぶ。認証済み context から開く。
-    const context = await browser.newContext({ storageState: 'e2e/.auth/user.json' });
+    // パスは直書きせず、実行中 project の state を引き継ぐ（admin project が user state で消しに行く事故を防ぐ）。
+    const context = await browser.newContext({ storageState: test.info().project.use.storageState });
     const page = await context.newPage();
+    const tasks = new TasksPage(page);
     try {
-      await page.goto('/tasks', { waitUntil: 'domcontentloaded' });
-      // ロード完了ゲート: これが無いと以下の count() も toHaveCount(0) も未ロードの 0 を拾う。
-      // 対象行の出現待ちは代用にできない（本文が既に消している可能性がある）。
-      await expect(taskList(page)).toBeAttached();
-      const row = rowByName(page, name);
-      // ここでの 0 は「未ロード」ではなく「本文の削除で既に消えている」を意味する
+      await tasks.openForTeardown();   // ロード完了ゲート込み: 無いと以下の count() も toHaveCount(0) も未ロードの 0 を拾う
+      const row = tasks.rowByName(name);
+      // ゲート後の count() は「分岐」用途（assert ではない）。ここでの 0 は「未ロード」ではなく「本文の削除で既に消えている」を意味する
       if (await row.count()) {
         await row.getByRole('button', { name: '削除' }).click();
-        await expect(page.getByText(`「${name}」を削除しますか？`)).toBeVisible();  // 対象名で取り違え検出
+        await expect(page.getByRole('dialog')).toContainText(name);        // 対象名で取り違え検出
         await page.getByRole('button', { name: '確認' }).click();
       }
-      // 必須: 後始末が実際に効いたかを検証する。ロード完了済みなので自明には通らない。
+      // 必須: 後始末が実際に効いたかを検証する（web-first）。ロード完了済みなので自明には通らない。
       await expect(row).toHaveCount(0);
     } finally {
       await context.close();
@@ -152,10 +216,50 @@ test.describe('task lifecycle', () => {
 });
 ```
 
+`api` 経路（plan が `setup=api / teardown=api` と確定した場合）の fixture の形。**seed/teardown の実体は `request` fixture で、spec 本文には UI 操作と検証だけを残す**:
+
+```ts
+// e2e/fixtures/tasks.fixture.ts — api 経路の seed/teardown。cookie は project の storageState から request fixture が流用する
+import { test as base, expect } from '@playwright/test';
+
+export const test = base.extend<{ seededTask: { id: string; name: string } }>({
+  seededTask: async ({ request }, use, testInfo) => {
+    const name = `[E2E削除可] task-${testInfo.parallelIndex}-${Date.now()}`;  // worker 間でも衝突しない
+    const res = await request.post('/api/tasks', { data: { title: name } });   // @guessed（エンドポイントは plan の投入手段に従う）
+    expect(res.ok(), `[precheck] seed に失敗: ${res.status()}`).toBeTruthy();
+    const { id } = await res.json();
+    await use({ id, name });
+    // 冪等な後始末: 本文が UI で削除済み（END で消滅を検証するシナリオ）なら DELETE は 404 を返す。それも成功扱い。
+    const del = await request.delete(`/api/tasks/${id}`);
+    expect([200, 204, 404], `teardown DELETE が失敗: ${del.status()}`).toContain(del.status());
+    const after = await request.get(`/api/tasks/${id}`);
+    expect(after.status()).toBe(404);                                             // 消滅検証は api 経路でも必須
+  },
+});
+export { expect };
+```
+
 ## 成果物
 
-`e2e/tests/<feature>.spec.ts`。plan の各シナリオ（S1, S2, ...）を `test()` に1対1で対応させる。
+生成物の層は **spec（必須）＋ pages（条件付き必須）＋ fixtures / selectors（任意）**（多層 POM は採らない）:
 
+| 層 | パス | 置くもの | 必須 |
+|---|---|---|---|
+| spec | `e2e/tests/<feature>.spec.ts` | `test()` / `test.step()` / assert。plan の各シナリオ（S1, S2, ...）を `test()` に1対1で対応させる | 必須 |
+| pages | `e2e/pages/<feature>.page.ts` | 入口 `open()`・ロード完了ゲート `waitLoaded()`・teardown 入口 `openForTeardown()`・行特定 `rowByName()`・操作メソッド。**2テスト以上（本文と teardown を含む）で使うロケータ・ゲート・teardown 入口はここへ** | **破壊的・自己完結シナリオを含む feature では必須**（teardown が別 context から本文と同じ入口・ロード完了ゲートを使うため。1 feature 1 ファイル）。非破壊のみで共有物が spec 内のローカル helper で済む feature は省略可 |
+| fixtures | `e2e/fixtures/<feature>.fixture.ts` | plan の `data.setup`/`data.teardown` が `api`/`db` のときの seed/teardown（`test.extend`） | api/db 経路のときのみ |
+| selectors | `e2e/selectors/<feature>.ts` | `data-testid` の定数化 | アプリに data-testid がある場合のみ |
+
+- **spec のロケータ直書きは禁止しない**（収束ループが `@guessed` を行単位で付け外しするため、1テストでしか使わないロケータは spec に置いてよい）。ただし**同じロケータを2テスト以上に複製したら pages へ移す**。
+- **`@guessed` は pages にも付く**。実画面未観測のロケータを pages に置いたら同様に行末へ `// @guessed` を付け、収束ループ・Step4 の grep 対象は `e2e/tests/<feature>.spec.ts` と `e2e/pages/<feature>.page.ts` の両方。
+- **各 `test()` の本文を `test.step()` で plan の観測点 ID どおりに区切る（plan↔trace の手順粒度トレーサビリティ）。** step 名は `'S<n>-<ID> <plan の文言>'` で、ID は plan の観測点 ID と1対1:
+  - `S<n>-PRE <開始状態の確認>` — **必ず先頭**。plan の「開始状態の確認（precheck）」を assert する（下記）。
+  - `S<n>-O<k> <操作>` — plan の操作列の番号 `k`。
+  - `S<n>-CP<k> <中間観測点>` — plan の中間観測点 `CP<k>`。**観測点の assert はその step の中に置く**（step の外に散らすと Step4 の突合が「無し」と判定する）。操作と観測点が1行で対になる場合は `S<n>-O<k>` の step 内で操作し、直後の `S<n>-CP<k>` step で assert する。
+  - `S<n>-END <終了条件>` — 原則末尾。終了条件の assert をここに置く。否定観測の `CP`（「API が呼ばれない」等）を陽性ランドマークの後に評価するために `END` の後へ置く場合は、plan の中間観測点にその順序を書く（Step4 は step の有無で突合するので順序は問わない）。
+  - ID を捏造しない（plan に無い `CP` を足したら plan へ「確定（Step3 実走）」で書き戻す）。Step4 の Coverage Matrix は step 名で `S<n>-CP<k>` / `S<n>-END` の有無を機械的に突合する。
+- **precheck（`S<n>-PRE`）**: plan の「開始状態の確認（precheck）」（ログイン済みランドマーク・前提データの可視シグナル・書き込みスコープ確定）を web-first assert する。**失敗メッセージに `[precheck]` を含める**——`await expect(loc, '[precheck] <何が無いか>').toBeVisible()` の第2引数。Step4 は `[precheck]` を含む失敗を「前提データ不整合」へ機械分類し、同一原因の全赤を1件に畳む。**precheck に本検証を混ぜない**（state 失効と実装不具合を切り分けるための段なので、対象機能の挙動はここで assert しない）。
+- **`exec=heavy` のシナリオは `tag` に `@heavy` を追加する**（`light` はタグ無し）。scaffold の `chromium` project は `grepInvert: /@heavy/`、`chromium-heavy` project は `grep: /@heavy/` かつ `fullyParallel: false`・`timeout: 180_000` で走る。plan の `exec` と食い違うタグを付けない（`/e2e-audit` は `@heavy` を gap 集計に使わず heavy 件数として数えるだけ）。
 - **各 `test()` のタイトル末尾に Coverage タグ `[S<n> / map#<m>]` を埋め込む**（例: `[S1 / map#2]`）。`S<n>` は plan のシナリオ番号、`map#<m>` は対応する遷移マップ行の番号。**Step4（e2e-run）の Coverage Matrix がこのタグを機械的に逆引きして plan↔spec を突合する**ので、省略しない。シナリオが複数の遷移マップ行に跨るなら `[S3 / map#3,#5]` のように併記する。対応する遷移マップ行が無い（plan 起点で足したシナリオ等）なら `map#-` と書く。
 - タイトルに置けない事情があれば直前の近接コメントに同じタグを書く（タイトル優先）。
 - **横断 coverage タグ `tag: ['@feature:<slug>', '@class:<slug>', '@role:<slug>']` を `test()` のオプションに付ける**（タイトルタグとは別系統・併用）。これは `/e2e-audit` が feature 横断で class/role の充足を集計するための機械可読タグで、**plan の `coverage` フィールド（class/role）の mirror**。値は plan に揃える（勝手な slug を作らない）:
@@ -170,25 +274,55 @@ import { test, expect } from '@playwright/test';
 
 // plan: e2e/plans/<feature>.md
 test.describe('<feature>', () => {
-  // S1. ログイン成功（happy path） / 遷移マップ #2 / coverage: class=happy role=guest
+  // S1. ログイン成功（happy path） / 遷移マップ #2 / coverage: class=happy role=guest exec=light / data: setup=seed own=shared teardown=none
   test('logs in with valid credentials [S1 / map#2]', { tag: ['@feature:login', '@class:happy', '@role:guest'] }, async ({ page }) => {
-    await page.goto('/login');                    // 開始状態（入口の goto は @guessed を付けない）
-    await page.getByLabel('メールアドレス').fill('user@example.com');  // @guessed
-    await page.getByLabel('パスワード').fill('password');              // @guessed
-    await page.getByRole('button', { name: 'ログイン' }).click();      // @guessed
-    // 中間観測点: ローディング → 遷移
-    await expect(page).toHaveURL(/\/dashboard/);   // 終了条件 // @guessed
-    await expect(page.getByRole('heading', { name: 'ダッシュボード' })).toBeVisible();  // @guessed
-    // 視覚差分が重要なら: await expect(page).toHaveScreenshot('dashboard.png');
+    await test.step('S1-PRE 未ログインでログインフォームが表示される', async () => {
+      await page.goto('/login');                    // 開始状態（入口の goto は @guessed を付けない）
+      await expect(page.getByRole('button', { name: 'ログイン' }), '[precheck] ログインフォームが無い').toBeVisible();  // @guessed
+    });
+    await test.step('S1-O1 メール・パスワードを入力して送信', async () => {
+      await page.getByLabel('メールアドレス').fill(process.env.E2E_USER!);  // @guessed
+      await page.getByLabel('パスワード').fill(process.env.E2E_PASS!);       // @guessed
+      await page.getByRole('button', { name: 'ログイン' }).click();          // @guessed
+    });
+    await test.step('S1-CP1 押下後にローディングインジケータが表示される', async () => {
+      await expect(page.getByRole('progressbar')).toBeVisible();  // @guessed（plan の CP1 と 1:1。既知ロケータの観測点は active assert）
+    });
+    await test.step('S1-CP2 認証 API 完了後 /dashboard へ遷移する', async () => {
+      await expect(page).toHaveURL(/\/dashboard/);   // @guessed（plan の CP2 と 1:1）
+    });
+    await test.step('S1-END ダッシュボード見出しとユーザー名が表示される', async () => {
+      await expect(page.getByRole('heading', { name: 'ダッシュボード' })).toBeVisible();  // @guessed
+      // 視覚差分が重要なら: await expect(page).toHaveScreenshot('dashboard.png');
+    });
   });
   // ↑ 静的生成直後はこのように実画面未観測の行に @guessed が付く。収束ループで実走 green になった行から外し、
   //   N 回で通らなければ残したまま Step4 へ残差として渡す。
 
-  // S2. 必須項目未入力（validation error） / 遷移マップ #4 / coverage: class=validation role=guest
+  // S2. 必須項目未入力（validation error） / 遷移マップ #4 / coverage: class=validation role=guest exec=light / data: setup=none own=self teardown=none
   test('shows validation error when fields are empty [S2 / map#4]', { tag: ['@feature:login', '@class:validation', '@role:guest'] }, async ({ page }) => {
-    await page.goto('/login');
-    await page.getByRole('button', { name: 'ログイン' }).click();
-    await expect(page.getByText('メールアドレスを入力してください')).toBeVisible();
+    await test.step('S2-PRE 未ログインでログインフォームが表示される', async () => {
+      await page.goto('/login');
+      await expect(page.getByRole('button', { name: 'ログイン' }), '[precheck] ログインフォームが無い').toBeVisible();
+    });
+    // CP1「API は呼ばれない」は否定観測なので route で呼び出しを記録し、END の陽性ランドマーク後に判定する
+    let loginCalls = 0;
+    await page.route('**/api/login', async (route) => { loginCalls += 1; await route.continue(); });  // @guessed
+    await test.step('S2-O1 未入力のまま送信', async () => {
+      await page.getByRole('button', { name: 'ログイン' }).click();
+    });
+    await test.step('S2-END 検証メッセージが表示され /login に留まる', async () => {
+      await expect(page.getByText('メールアドレスを入力してください')).toBeVisible();
+      await expect(page).toHaveURL(/\/login/);   // 否定「遷移しない」の代わりに留まることを positive に確定
+    });
+    await test.step('S2-CP1 /api/login は呼ばれない（クライアント検証で止まる）', async () => {
+      expect(loginCalls).toBe(0);   // route カウンタ（DOM の同期 read ではない）を陽性ランドマーク後に読む
+    });
+  });
+
+  // S9. 重いエクスポート（exec=heavy） / 遷移マップ #7 — @heavy を足すと chromium-heavy project（直列・180s）で走る
+  test('exports the full report [S9 / map#7]', { tag: ['@feature:login', '@class:happy', '@role:user', '@heavy'] }, async ({ page }) => {
+    // …
   });
 });
 ```
@@ -200,9 +334,17 @@ test.describe('<feature>', () => {
 - [ ] **確信のないロケータ・待機・期待値の行に `// @guessed` が付いているか**（実画面未観測の行は入口 goto を除き原則すべて付与＝過剰申告側に倒す。収束ループで実走 green になった行から外す）
 - [ ] **各 test タイトル（または近接コメント）に Coverage タグ `[S<n> / map#<m>]` があるか**（run の突合用・省略禁止）
 - [ ] **各 test に横断 coverage タグ `tag: ['@feature:<slug>', '@class:<slug>', '@role:<slug>']` があり、値が plan の `coverage`（class/role）と一致するか**（audit の集計用・省略禁止／`annotations` ではなく `tag`）
-- [ ] **破壊的・自己完結シナリオの describe に `test.describe.configure({ mode: 'serial' })` が付いているか**
-- [ ] CSS/XPath ロケータが残っていないか（残すなら理由をコメント）
+- [ ] **破壊的・自己完結シナリオの describe に `test.describe.configure({ mode: 'serial' })` が付いているか**（例外: plan の `data.own=self` かつ `api`/`db` 経路の隔離データなら付けない）
+- [ ] **各 test の本文が `test.step('S<n>-PRE …')` → `S<n>-O<k>` → `S<n>-CP<k>` → `S<n>-END` で区切られ、step ID が plan の観測点 ID（PRE / O<k> / CP<k> / END）と一致するか**（観測点の assert が対応する step の中にあるか／plan に無い ID を捏造していないか）
+- [ ] **`S<n>-PRE` が各 test の先頭にあり、plan の「開始状態の確認（precheck）」を `[precheck]` 付きメッセージで assert しているか**（本検証を precheck に混ぜていないか）
+- [ ] **`@heavy` タグの有無が plan の `coverage: exec=` と一致するか**（`heavy` のみ付与・`light` は無し）
+- [ ] **setup/teardown の経路が plan の `data: setup= / own= / teardown=` と一致するか**（codegen が経路を勝手に選んでいないか／`data` 行が無い旧 plan は ui/self 扱いにした旨を報告したか／api 経路の実体が `e2e/fixtures/<feature>.fixture.ts` にあるか）
+- [ ] **2テスト以上で使うロケータ・ロード完了ゲート・teardown 入口が `e2e/pages/<feature>.page.ts` にあるか**（spec 間・本文と teardown 間で同じロケータを複製していないか）
+- [ ] CSS/XPath ロケータが残っていないか（残すなら理由をコメント。pages 側も同様）
 - [ ] 固定待機（`waitForTimeout`）・`waitForLoadState('networkidle')` が無いか
+- [ ] **`expect(await …)` の形（同期 read `count()`/`innerText()`/`isEnabled()`/`isVisible()` を静的 expect に渡す）が無いか**（web-first matcher に置換。同期 read は分岐だけ、かつ直前にロード完了ゲート）
+- [ ] **同一表示になりうる再取得（ソート/フィルタ/SPA 内更新/戻る/再訪）のあとに、再取得完了の確定（操作前に仕掛けた `waitForResponse` の await／`aria-sort`・URL クエリ・busy 出現→消滅の assert）なしで内容を assert していないか**
+- [ ] **silent success（toast も遷移も無い操作）を busy シグナルの「出現→消滅」の2段で待っているか**（消滅単独＝否定アサートになっていないか／取りこぼすなら「完了後にだけ変わる要素」へ切替）
 - [ ] **遷移を伴うクリックの直後に、遷移先ロケータを触る前の遷移 assert（`toHaveURL` か遷移先固有要素の `toBeVisible`）があるか**
 - [ ] **`page.goto()` を「入口（開始状態）」「teardown の新規 context 起点」以外で使っていないか**（操作列の途中遷移を goto で飛ばしていないか／UI を辿っているか）
 - [ ] **出現待ちをしない `nth()`/`last()`/`first()` で新規行・未確定要素を掴んでいないか**（新規作成は keyboard 直接入力 or `toHaveCount(before+1)` 待ち→`nth`）
@@ -211,12 +353,16 @@ test.describe('<feature>', () => {
 - [ ] 中間観測点が assertion または明示コメントで表現されているか
 - [ ] **否定アサート（`toHaveCount(0)`・`not.toHaveURL`・「エラーが出ない」）の前に、その否定が意味を持つ前提を positive assert で確定しているか**（未ロード／注入未発火で自明に通っていないか）
 - [ ] **派生名（`<名前>-EDITED` 等）を扱うシナリオで、部分一致の `hasText`/`getByText` が別行を数えていないか**（完全一致で数えているか）
-- [ ] 破壊的・自己完結シナリオに teardown（**UI 経路・可視プレフィックス＋runId のユニーク名・認証済み `newContext`・ロード完了ゲートの後段に「消えたこと」の検証アサート**）があるか
+- [ ] 破壊的・自己完結シナリオに teardown（**plan の `data.teardown` 経路（ui/api/db）・可視プレフィックス＋runId のユニーク名・ui なら認証済み `newContext`（state は project から引き継ぐ）・ロード完了ゲートの後段に「消えたこと」の検証アサート**）があるか
 - [ ] **teardown の消滅検証が「ロード完了ゲート」の後段にあるか**（`if (await count())` ガードと検証が同じ未ロード状態で素通りしていないか／行の出現待ちを teardown のロード完了代用にしていないか）
 - [ ] **削除等の確定操作の前に、確認ダイアログ本文の対象名を assert しているか**（別データを消す事故の検出）
 - [ ] 複数のfeatureファイルが同一の外部データストア（DB/Firestore等）を破壊的に共有編集していないか（`describe.serial` はファイル内競合しか防げないため）。している場合、ローカル実行でも1 workerにする対処（`workers: 1` への変更・`--workers=1` の付与・競合spec群を別projectに分けて `--workers=1` で別実行、のいずれか。`fullyParallel: false` だけでは、またproject分割だけでは、ファイル間の並行は止まらない）が必要である旨をユーザーに報告したか（codegenが自動で書き換えるのではなく、プロジェクト設定者の判断を仰ぐ）
 - [ ] teardown/cleanupの失敗を `console.warn` や `.catch(() => {})` のみで握り潰し、テスト自体をpassさせていないか（迷うなら握らずに落とす。他featureのteardownと一貫した方針になっているか）
 - [ ] Step2 で除外と決まっていないのに `test.skip` で眠らせていないか（除外は生成しない／自己完結は teardown 付きで生成）
+- [ ] **spec / pages / fixtures に `connectOverCDP`・`9222`・`E2E_CDP_URL`・`localhost` の直書きが無いか**（収束ループの探索専用コードの残骸。実走は storageState と `baseURL` で回す）
+- [ ] **storageState のパス（`e2e/.auth/user.json` 等）や `process.env.E2E_STORAGE_STATE` を spec / pages / fixtures に直書きしていないか**（teardown は `test.info().project.use.storageState` から取る）
+- [ ] **`E2E_USER_POOL` を使う feature で、spec と feature fixture の import 元（`../fixtures/test`）が揃っているか**（片方だけ `@playwright/test` から extend していないか）
+- [ ] **retry 前提・順序前提になっていないか**（他 test の作成物に依存していないか／describe 内で `RUN_ID` と名前定数以外の可変状態を test 間で共有していないか）
 
 ### 機械実行ゲート（必須・落ちたら直す）
 
@@ -228,7 +374,13 @@ pnpm exec playwright test --list
 
 # 任意: tsconfig.json が存在する場合のみ型検査
 pnpm exec tsc --noEmit
+
+# 必須: 禁止パターンの grep（1件でも当たれば直す。対象は spec / pages / fixtures）
+grep -nE "waitForTimeout|networkidle|expect\(await |\.catch\(\(\) => \{\}\)|connectOverCDP|9222|E2E_CDP_URL|E2E_STORAGE_STATE|e2e/\.auth/[a-z0-9-]+\.json" \
+  e2e/tests/<feature>.spec.ts e2e/pages/<feature>.page.ts e2e/fixtures/<feature>.fixture.ts 2>/dev/null
 ```
+
+`expect(await ` は同期 read＋静的 expect の検出、`e2e/.auth/…json` と `E2E_STORAGE_STATE` は storageState パスの直書き／env 直参照の検出（生成物は `test.info().project.use.storageState` から取る）。**待機・ロケータ規約のパターン（`waitForTimeout` / `networkidle` / `expect(await ` / `.catch(() => {})`）は `/e2e-audit` の「spec 健全性」表と共通**なので、ここで潰しておけば audit で再指摘されない。CDP 残骸（`connectOverCDP` / `9222` / `E2E_CDP_URL`）と state パス直書きはこの codegen ゲート専用の検出で、audit の表には無い。
 
 コンパイルが通ったら、次の**収束ループ**へ進む（静的生成はここで終わり）。
 
@@ -331,7 +483,7 @@ pnpm exec playwright test e2e/tests/<feature>.spec.ts
 
 ### @guessed の寿命（再掲・重要）
 
-`@guessed` は「実画面未観測」の生存フラグ。**(a)収束で外し、(b)残差では残す。** Step4 はこの残存マーカーで残差集合を機械的に拾うので、**収束したのに外し忘れると Step4 が誤って残差に数える**。外し漏れ・付け漏れに注意する。
+`@guessed` は「実画面未観測」の生存フラグ。**(a)収束で外し、(b)残差では残す。** Step4 はこの残存マーカーで残差集合を機械的に拾うので、**収束したのに外し忘れると Step4 が誤って残差に数える**。外し漏れ・付け漏れに注意する。**grep 対象は `e2e/tests/<feature>.spec.ts` と `e2e/pages/<feature>.page.ts` の両方**（pages に置いたロケータの `@guessed` は、それを使う全 test が green になったときに外す）。
 
 ### 収束ループの N=3 は flaky 再評価とは別物（混同しない）
 

@@ -13,8 +13,8 @@ WebアプリのE2Eテストシナリオを生成する **Claude Code プラグ�
 | `/e2e-planner:e2e-audit` | command | 横断 audit。スイート全体をスキャンして `e2e/index.md` を再生成（単独実行可） |
 | `e2e-map` | skill | Step1 到達範囲の地図化 → 遷移マップ（Markdown） |
 | `e2e-record` | skill | **代替 Step1**（録画起点）。録画JSONを正規化し価値フロー/後始末を人間確認 → e2e-map と同体裁の plan。録画はヒントで正解ではない。単独なら `/e2e-planner:e2e-record <feature> <録画JSON>` で plan だけ作って止められる |
-| `e2e-spec` | skill | Step2 シナリオ仕様化 → Markdown plan（観測点つき・`coverage` メタつき） |
-| `e2e-codegen` | skill | Step3 Playwright `.spec.ts` 生成（Coverage タグ＋横断 `tag` 付与） |
+| `e2e-spec` | skill | Step2 シナリオ仕様化 → Markdown plan（観測点 ID つき・`coverage` / `data` メタつき・データ準備経路を HITL 確定） |
+| `e2e-codegen` | skill | Step3 Playwright `.spec.ts` 生成（Coverage タグ＋横断 `tag` 付与・`test.step` で観測点 ID を mirror） |
 | `e2e-run` | skill | Step4 実行・trace/video/screenshot 収集・失敗6分類 |
 | `e2e-audit` | skill | Step5 feature 横断の coverage 不足を算出 → `e2e/index.md` 生成（テストは再実行しない） |
 
@@ -42,10 +42,13 @@ e2e-planner/
 │   ├── package.snippet.json    #   package.json にマージする scripts
 │   ├── .env.example / .gitignore
 │   ├── e2e/auth.setup.ts       #   form ログイン → storageState 保存
+│   ├── e2e/fixtures/test.ts    #   worker 別アカウント割当 fixture（E2E_USER_POOL・任意）
 │   ├── e2e/{plans,tests,reports}/  # 成果物の配置先（.gitkeep）
 │   └── scripts/                #   SSO 用 state 採取スクリプト（save-state-cdp.ts ほか）
 ├── examples/                   # 参考実装（login の plan / setup / spec）
 ├── claudedocs/                 # 開発アーティファクト（プラグイン動作には不要・下記の配布注記を参照）
+│   ├── plans/                  #   変更単位の設計 plan（実装時の判断記録）
+│   ├── decisions/              #   ADR（将来へ影響する設計判断の記録）
 │   └── ept/                    #   品質改善（EPT）の記録
 │       ├── *-eval.md           #     4スキルの反復ログ・収束判定
 │       ├── fixtures/           #     eval の採点入力（median/edge）
@@ -62,10 +65,13 @@ e2e-planner/
 ```
 e2e/
 ├── index.md                            # Step5 横断 coverage スナップショット（e2e-audit が毎回上書き生成・手書き不可）
-├── plans/<feature>.md                  # Step1 遷移マップ + Step2 シナリオ仕様（coverage メタつき）
-├── tests/<feature>.spec.ts             # Step3 Playwright spec
+├── plans/<feature>.md                  # Step1 遷移マップ + Step2 シナリオ仕様（coverage / data メタつき）
+├── tests/<feature>.spec.ts             # Step3 Playwright spec（test.step で plan の観測点 ID を刻む）
+├── pages/<feature>.page.ts             # Step3 入口・ロード完了ゲート・teardown 入口（破壊的シナリオを含む feature では必須・他は任意）
+├── fixtures/<feature>.fixture.ts       # Step3 api/db 経路の seed/teardown（plan の data が api/db のときのみ）
+├── selectors/<feature>.ts              # Step3 data-testid 定数（アプリに testid があるときのみ）
 ├── reports/<feature>-<YYYYMMDD-HHmm>.md # Step4 失敗分類表
-├── .report/                            # Playwright HTML レポート
+├── .report/                            # Playwright HTML レポート（CI では junit.xml も同居）
 └── .artifacts/                         # trace/video/screenshot
 ```
 
@@ -110,7 +116,7 @@ e2e/
 ```bash
 cp "${CLAUDE_PLUGIN_ROOT}/scaffold/playwright.config.ts" ./playwright.config.ts
 mkdir -p e2e/tests e2e/plans e2e/reports
-pnpm add -D @playwright/test && pnpm exec playwright install
+pnpm add -D @playwright/test && pnpm exec playwright install --with-deps chromium   # CI の Linux エージェントでは --with-deps でブラウザ依存ライブラリも入れる
 # scaffold/package.snippet.json の scripts を package.json にマージ
 ```
 
@@ -134,8 +140,9 @@ cp "${CLAUDE_PLUGIN_ROOT}/scaffold/.env.example" ./.env.example   # → cp .env.
 cat "${CLAUDE_PLUGIN_ROOT}/scaffold/.gitignore"                   # 既存 .gitignore にマージ
 ```
 
-- `auth.setup.ts` が env（`E2E_USER`/`E2E_PASS`）で form ログインし `e2e/.auth/user.json` を保存する。
-- `scaffold/playwright.config.ts` は **setup project ＋ `dependencies:['setup']` ＋ `storageState`** 構成済み。
+- `auth.setup.ts` が env（`E2E_USER`/`E2E_PASS`）で form ログインし `E2E_STORAGE_STATE`（既定 `e2e/.auth/user.json`）に保存する。**state のパスは config / setup / fixture / 生成 spec のすべてがこの env を見る**（spec に直書きしない。CI では Secure File 等から展開したパスを渡す）。
+- `scaffold/playwright.config.ts` は **setup project ＋ `dependencies:['setup']` ＋ `storageState`** 構成済み。認証済み project は light（`chromium`）/ heavy（`chromium-heavy`・`@heavy` タグのみ・非並列・180s）の2つに展開される。
+- **並列 worker が同一アカウントを同時操作すると壊れる状態**（単一セッション化・ユーザー単位の下書き/カート/設定）があるアプリは、`E2E_USER_POOL`（`mail:pass,mail:pass,…`・同一ロール・**form モード専用**）を設定し、spec の import を `e2e/fixtures/test.ts` に切り替えると worker ごとに別アカウントの state を当てる（アカウント数が並列度の上限）。プール未設定なら従来の単一 state にフォールバックする。
 - **`.env` と `e2e/.auth/` は絶対コミットしない**（ログイン済みセッション＝秘密情報）。`.gitignore` に登録される。
 - **採取は cookie / localStorage / IndexedDB の3種すべてを自動カバー**する（`storageState({ indexedDB: true })` 常時 ON）。Firebase など認証トークンを **IndexedDB**（`firebaseLocalStorageDb`）に置くアプリも、特別なモードを足さず form 自動採取・CDP 手動採取いずれでも採れる。復元も `storageState:` 指定だけで自動（自前注入は不要）。
 - **Playwright は 1.51 以上が必須**（IndexedDB 採取 `indexedDB: true` が 1.51 で追加されたため）。`scaffold/package.snippet.json` は `@playwright/test ^1.51.0` を指定する。
@@ -146,11 +153,11 @@ cat "${CLAUDE_PLUGIN_ROOT}/scaffold/.gitignore"                   # 既存 .giti
 
 | モード | setup project | storageState | dependencies | 用途 |
 |--------|---------------|--------------|--------------|------|
-| `form`（既定） | あり | `e2e/.auth/user.json` | `['setup']` | form ログインを `auth.setup.ts` が自動化して state を生成 |
-| `prebuilt-state` | なし | `e2e/.auth/user.json` | なし | **SSO/OTP/2FA** 等で手動採取（後述の CDP 方式）した state を使う |
+| `form`（既定） | あり | `E2E_STORAGE_STATE`（既定 `e2e/.auth/user.json`） | `['setup']` | form ログインを `auth.setup.ts` が自動化して state を生成 |
+| `prebuilt-state` | なし | `E2E_STORAGE_STATE`（既定 `e2e/.auth/user.json`） | なし | **SSO/OTP/2FA** 等で手動採取（後述の CDP 方式）した state を使う |
 | `none` | なし | 空（`{cookies:[],origins:[]}`） | なし | 認証不要なアプリ |
 
-SSO 等で form 自動化できないアプリは `E2E_AUTH_MODE=prebuilt-state` にし、下記の `save-state-cdp.ts` で採取した `e2e/.auth/user.json` を使う。
+SSO 等で form 自動化できないアプリは `E2E_AUTH_MODE=prebuilt-state` にし、下記の `save-state-cdp.ts` で採取した state（`E2E_STATE_OUT` の出力先＝config が読む `E2E_STORAGE_STATE`）を使う。
 
 ### ロール（権限差分）
 
@@ -170,7 +177,7 @@ pnpm add -D tsx   # スクリプト実行に必要
 # 2) その窓で対象アプリに普通にログイン（webdriver 制御外なので bot 検知に当たらない）
 # 3) 生きたセッションを storageState として吸い出す
 E2E_CDP_URL="http://localhost:9222" \
-E2E_STATE_OUT="e2e/.auth/user.json" \
+E2E_STATE_OUT="e2e/.auth/user.json" \      # config が読む E2E_STORAGE_STATE と同じ値にする（CI で別パスに展開するなら両方を揃える）
 E2E_VERIFY_HOST="app.example.com" \
 pnpm exec tsx scripts/save-state-cdp.ts
 ```
@@ -200,12 +207,16 @@ pnpm exec tsx scripts/save-state-cdp.ts
 - **自己完結（setup→検証→teardown）が既定、除外はオプトアウト。** 価値シナリオは既定で自己完結作成し、ユーザーが「作らないで」と言ったときだけ除外（Step2）。結果的に破壊的なシナリオがあれば**一括提示で「自己完結/除外」を一度に確認**するだけ。
 - **無人オーサリング時**（その場で確認できない新規作成）は破壊的シナリオを除外し「要確認」と明示。検証済みの破壊的テスト（teardown 付き）は CI 実行可。
 - **不可逆な副作用**（課金・実メール・外部通知など teardown 不能）は人がいても除外 or 明示的合意で慎重に。
-- **コード化（Step3）は Step2 の確定方針に従うだけ。** 勝手に `test.skip` で黙らせない。自己完結シナリオは setup/teardown を **UI 経路（純 E2E）**で生成し、teardown は best-effort・作成データは timestamp 付きユニーク名。
+- **前提データの準備経路（`ui` / `api` / `db`）も Step2 で確定する。** 作成/削除の UI 自体が検証対象なら `ui` で確定して質問しない。**検証対象でない前提データ**（削除対象・一覧に必要な N 件・permission の対向データ）は、一括提示表の「準備経路 / teardown 経路」列で承認ゲート①のときに人が確定する（既定の提案は Step1 の「投入手段」が有れば `api`/`db`、無ければ `ui`）。結果は各シナリオの `data` 行（`setup` / `own` / `teardown`）に写す。
+- **コード化（Step3）は Step2 の確定方針に従うだけ。** 勝手に `test.skip` で黙らせない。自己完結シナリオは plan の `data` 経路どおりに setup/teardown を生成する（`ui` は実際の操作経路、`api` は `request` fixture、`db` はプロジェクト提供スクリプト。プラグインは DB/API 実装を持たない）。作成データは可視プレフィックス＋実行ID のユニーク名、teardown の末尾で「消えたこと」を必ず検証する。
 
 ## 設計上の固定方針（レポート準拠）
 
 - **Step2 基本7観点**: happy path / validation error / permission差分 / 戻る / 再読込 / 途中離脱 / ネットワーク遅延 を最低1件ずつ
-- **各シナリオ必須項目**: 開始状態・操作・中間観測点・終了条件・除外事項（破壊的・自己完結シナリオは teardown も）＋横断 audit 用 `coverage` メタ（class/role/status）
+- **各シナリオ必須項目**: 開始状態・開始状態の確認（precheck・`PRE`）・操作（`O<k>`）・中間観測点（`CP<k>` 採番）・終了条件（`END`）・除外事項（破壊的・自己完結シナリオは teardown も）＋横断 audit 用 `coverage` メタ（class/role/status/exec）＋前提データの `data` メタ（setup/own/teardown）
+- **観測点 ID は plan↔trace の契約**: Step3 が `test.step('S<n>-PRE …')` / `('S<n>-O<k> …')` / `('S<n>-CP<k> …')` / `('S<n>-END …')` に mirror し、Step4 の Coverage Matrix が step 名で機械突合する。先頭の `S<n>-PRE` は `[precheck]` 付きメッセージで前提を assert し、Step4 はその失敗を「前提データ不整合」へ機械分類する
+- **待機戦略**: `waitForTimeout` / `networkidle` 禁止、同期 read（`count()`/`innerText()`）＋静的 expect 禁止（web-first matcher へ）、否定アサートの前に陽性ランドマーク、「操作後も同じ表示」の検証は再取得完了を先に確定（操作前に `waitForResponse`）、silent success は busy の出現→消滅を2段で待つ
+- **retries は CI でも 0**: flaky は retry で吸収せず、Step4 の無修正3回（`--repeat-each 3`）で診断して Step3 へ戻す
 - **ロケータ**: role/text/testid 優先、CSS/XPath は最後の手段、`waitForTimeout` 禁止
 - **Step4 失敗6分類**: ロケータ破損 / 待機不足 / 前提データ不整合 / 期待値誤り / 視覚baseline未作成 / 環境依存
 - **VRT baseline の初回未生成は不具合扱いにしない**
@@ -214,13 +225,28 @@ pnpm exec tsx scripts/save-state-cdp.ts
 
 feature 横断の coverage matrix を**維持台帳に持たず派生で出す**。同じ事実を複数箇所で同期させると drift するため、**正本は plan**・spec はタグで指す・audit は突合するだけ、という既存方針の延長。
 
-- **`coverage` メタ（plan が正本）**: 各シナリオに `class` / `role` / `status` の3フィールドを持たせる（Step2 / e2e-spec）。`route`・`risk` は足さない（route は開始状態に URL が既にある／risk は主観で drift）。
+- **`coverage` メタ（plan が正本）**: 各シナリオに `class` / `role` / `status` / `exec` の4フィールドを持たせる（Step2 / e2e-spec）。`route`・`risk` は足さない（route は開始状態に URL が既にある／risk は主観で drift）。
+  - **exec**（実行制御・既定 `light`）: `heavy`（想定 60s 超・重い非同期/ファイル往復・共有データへの書き込みで直列必須）のときだけ Step3 が `@heavy` タグを付け、`chromium-heavy` project（非並列・180s）で走る。audit は gap に数えない（index.md に件数列を出すだけ）
   - **class**（基本7観点の slug）: `happy` / `validation` / `permission` / `back` / `reload` / `abandon` / `network`
   - **role**（`storageState` 名に対応する slug）: `guest` / `user` / `admin` など
   - **status**（4値）: `active`（生成対象）/ `excluded`（明示除外）/ `needs_review`（承認前・有効に数えない＝既存「要確認（無人除外）」と同一視）/ `covered_elsewhere`（別 feature で検証済み・新規）
 - **spec タグ（mirror）**: Step3（e2e-codegen）が `[S<n> / map#<m>]`（plan↔spec の S/map 突合・既存）に加え、Playwright ネイティブ `tag: ['@feature:<slug>', '@class:<slug>', '@role:<slug>']`（class/role の横断集計・実行時 `--grep`・新規）を付与する。`annotations` API は使わない（`tag` に一本化）。
   - タグは実行時フィルタにもそのまま効く: `pnpm e2e -- --grep '@class:happy'`（価値フローだけ）/ `--grep '@class:network'`（ネットワーク観点だけ）/ `--grep '@feature:<slug>'`（機能単位）/ `--grep-invert` で除外。よく使う `e2e:happy` / `e2e:network` は `scaffold/package.snippet.json` に登録済み。
-- **派生 `index.md`**: `e2e-audit`（Step5）が `plans/ tests/ reports/` をスキャンして feature 一覧・class×gap・role×gap・優先 gap 一覧を `e2e/index.md` に**毎回上書き生成**する。e2e-run の Coverage Matrix（1 feature 内）の横断版。テストは再実行しない（reports の feature ごと最新を `last_run`/`last_status` としてパース）。
+- **派生 `index.md`**: `e2e-audit`（Step5）が `plans/ tests/ reports/` をスキャンして feature 一覧・class×gap・role×gap・優先 gap 一覧・**spec 健全性**（`waitForTimeout` / `networkidle` / 残 `@guessed` / `expect(await` / `S<n>-PRE` 無し等、grep で確定できる件数のみ・段階評価なし）を `e2e/index.md` に**毎回上書き生成**する。e2e-run の Coverage Matrix（1 feature 内）の横断版。テストは再実行しない（reports の feature ごと最新を `last_run`/`last_status` としてパース）。
+
+## CI に載せやすい形（Azure Pipelines 想定・yaml 自体は範囲外）
+
+生成物と scaffold は、後から CI に載せるときに手を入れずに済む形にしてある。パイプライン定義そのものはこのプラグインの範囲外。
+
+- **CI 判定**: `playwright.config.ts` は `CI` に加えて Azure Pipelines の予定義変数 `TF_BUILD` を見る（`forbidOnly` / `workers` / JUnit 出力の分岐）。
+- **結果の機械可読化**: CI では `e2e/.report/junit.xml` を出す（`PublishTestResults@2` の JUnit 形式）。HTML レポートも同じ `e2e/.report` に出るので、そのディレクトリごと成果物にすれば証跡付きレポートと集計の両方が残る。shard するなら blob reporter（config にコメント例）と `e2e:merge` で1つにまとめる。
+- **retries は 0 のまま**: retry の pass は JUnit 上も成功に見えるので flaky が隠れる。`E2E_RETRIES` で明示的に上げない限り再試行しない。
+- **証跡**: `trace` / `video` は `retain-on-failure` が既定（retries 0 でも失敗時に必ず残る）。監査用途は `E2E_TRACE=on E2E_VIDEO=on`。
+- **認証**: form は `E2E_USER` / `E2E_PASS` を変数グループに置く。SSO 等の `prebuilt-state` は手元で採取した state を Secure File として登録し、展開先パスを `E2E_STORAGE_STATE` で渡す（CI では採取しない）。
+- **並列度**: `E2E_WORKERS` で上書きする。上げる前提は plan の `data.own=self`（隔離データ）と `E2E_USER_POOL`（worker 別アカウント）。
+- **ジョブ分割**: `--project=chromium` / `--project=chromium-heavy`（`e2e:light` / `e2e:heavy`）、`--grep '@feature:<slug>'` / `'@class:<slug>'` でそのまま分けられる。plan の任意節「実装対応」に map# とソースパスの対応を残しておくと、変更ファイルから対象 feature を絞る材料になる。
+- **VRT**: baseline は CI と同じ OS・同じブラウザ版で生成する（snapshot 名に OS サフィックスが付く）。日本語 UI は CI 側に CJK フォントが要る。
+- **plan に環境変数一覧**: Step1 の plan ヘッダーに必要な環境変数を1行書くので、変数グループの定義が plan から読める。
 
 ## 拡張フック点（本体には組み込まない）
 
