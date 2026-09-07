@@ -22,10 +22,17 @@ import { test as setup, expect } from '@playwright/test';
  * このファイルでは自動化しない。手動で1回ログインして state を取り出すか、
  * API ログイン（request.post でトークン取得 → state 注入）に置き換える。手順は README 参照。
  * その場合は playwright.config.ts を E2E_AUTH_MODE=prebuilt-state で動かす
- * （setup project を組まず、手動採取した e2e/.auth/user.json をそのまま使う）。
+ * （setup project を組まず、手動採取した storageState をそのまま使う）。
+ *
+ * ── worker ごとに別アカウントを使うとき ──────────────────────────
+ * 並列 worker が同一アカウントを同時操作すると壊れる状態（カート・下書き・単一セッション等）が
+ * あるなら、E2E_USER_POOL を設定して spec の import を e2e/fixtures/test.ts に切り替える。
+ * その場合も本 setup は既定 state（プール未設定時のフォールバック）を作るので残しておく。
  */
 
-const STORAGE_STATE = 'e2e/.auth/user.json';
+// 保存先は playwright.config.ts の STORAGE_STATE と同じ定義（env で差し替え可）。
+// config 側の project が読むパスと必ず一致させる（片方だけ変えると setup が作った state を誰も読まない）。
+const STORAGE_STATE = process.env.E2E_STORAGE_STATE ?? 'e2e/.auth/user.json';
 
 setup('authenticate as user', async ({ page }) => {
   const USER = process.env.E2E_USER;

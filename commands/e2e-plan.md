@@ -58,10 +58,11 @@ Step1 には**探索起点（`e2e-map`・既定）**と**録画起点（`e2e-rec
    - 成果物: 同じ `e2e/plans/<slug>.md` の「シナリオ仕様」セクション（Markdown plan）。
    - 基本7観点（happy path / validation error / permission差分 / 戻る操作 / 再読込 / 途中離脱 / ネットワーク遅延）を最低1件ずつ。
    - 各シナリオに「開始状態・操作・中間観測点・終了条件・除外事項」を必須で持たせる。
+   - 各シナリオに **`data`（前提データの準備/後始末経路 `setup`/`own`/`teardown`）・`exec`（`light`/`heavy`）・開始状態の確認（precheck・`PRE`）・中間観測点の `CP<k>` 採番**を持たせる（語彙は e2e-spec 参照。Step3 が `test.step` と `@heavy` に mirror する）。
 
 ### ▌承認ゲート①（plan レビュー）
 
-`e2e/plans/<slug>.md` を要約提示し、**ユーザーのレビュー・修正・承認を待つ**。
+`e2e/plans/<slug>.md` を要約提示し、**ユーザーのレビュー・修正・承認を待つ**。破壊的シナリオの自己完結/除外に加え、**検証対象でない前提データの準備経路（`ui`/`api`/`db`）と teardown 経路もここで確定する**（一括提示表の「準備経路 / teardown 経路」列。作成/削除 UI 自体が検証対象の行は `ui` 確定で質問しない）。
 
 > 「この plan で Step3（コード生成）に進んでよいか確認してください。修正があれば指示してください。」
 
@@ -83,6 +84,8 @@ Step1 には**探索起点（`e2e-map`・既定）**と**録画起点（`e2e-rec
    - **認証は Step3 で確立済み。Step4 は原則ノータスク**（`prebuilt-state` の state が失効していた場合のみ CDP 再採取）。
    - `pnpm exec playwright test e2e/tests/<slug>.spec.ts` を実行（証跡は収束後の確定版で取得）。
    - **残差（残 `@guessed` の失敗）だけ**を6分類（ロケータ破損 / 待機不足 / 前提データ不整合 / 期待値誤り / 視覚baseline未作成 / 環境依存）。収束済みは分類対象外。
+   - **`[precheck]` 付きの失敗（`S<n>-PRE` step）は「前提データ不整合」へ機械分類**し、同一原因の全赤を1件に畳む（アプリ不具合と環境側の不備を切り分ける）。
+   - **retries は CI でも 0 が既定**（`E2E_RETRIES` で明示上書きのみ）。flaky は retry で吸収せず、無修正3回の再評価で診断して Step3 へ戻す。
    - Coverage Matrix（plan↔spec↔結果突合）を作る。重要シナリオは**同一条件・無修正で3回**の flaky 再評価（収束ループの N=3 とは別物）。
    - 成果物: `e2e/reports/<slug>-<YYYYMMDD-HHmm>.md`（Coverage Matrix + 残差分類表 + trace/video/screenshot へのパス）。
    - **VRT baseline の初回未生成は不具合扱いにしない。**
@@ -97,6 +100,7 @@ Step1 には**探索起点（`e2e-map`・既定）**と**録画起点（`e2e-rec
 
 5. **`e2e-audit` skill** を起動し、`e2e/index.md`（横断スナップショット）を再生成する。
    - Step4（run）でレポートが出揃った直後に**自動実行**する。`plans/ tests/ reports/` をスキャンして feature 横断の coverage 不足を算出し、`e2e/index.md` を上書きする。**テストは再実行しない。**
+   - **spec 健全性（静的チェック）も index.md に出す**（`waitForTimeout` / `networkidle` / 残 `@guessed` / `expect(await` / `S<n>-PRE` 無し等、grep で確定できる件数のみ。段階評価は付けない）。
    - **Step4 の実行が失敗してもスキップせず常に実行**する（その feature の `last_status=failed` を index.md に反映する）。承認ゲート②（修正方針）の結果とは独立で、修正の前後どちらでも構わない（index.md は派生物なので承認を挟まない）。
    - これは Step1 の `e2e-map` が読む `e2e/index.md` の出口にあたる（入口=Step1 / 出口=Step5 で循環するが、毎回再生成するので drift しない）。
 
